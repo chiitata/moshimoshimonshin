@@ -1,13 +1,10 @@
-import {
-  FieldValue,
-  Timestamp,
-  type DocumentData,
-} from "firebase-admin/firestore";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import type { Deps } from "../deps.js";
 import type { DeletionJobDoc } from "../domain/firestoreDocs.js";
 import type { DeletionStepStatus } from "../domain/types.js";
 import type { DeletionStep } from "../domain/deletion.js";
 import {
+  CLAIM_TTL_MS,
   DELETION_STEPS,
   OVERDUE_ALERT_MS,
   retryDelayMs,
@@ -19,7 +16,7 @@ import {
   existsWhere,
   queryDocs,
 } from "../repos/helpers.js";
-import { findDueJobs } from "../repos/deletionJobs.js";
+import { findAbandonedJobs, findDueJobs } from "../repos/deletionJobs.js";
 
 export interface JobRunResult {
   jobId: string;
@@ -69,16 +66,26 @@ interface StepOutcome {
 export class DeletionWorker {
   constructor(private readonly deps: Deps) {}
 
-  /** Cloud Scheduler 相当: 期限到来の scheduled ジョブを列挙して実行する。 */
+  /**
+   * Cloud Scheduler 相当: 期限到来の scheduled ジョブと、
+   * running のままクレーム失効した放置ジョブを列挙して実行する。
+   */
   async scanDueJobs(): Promise<ScanResult> {
-    const now = Timestamp.fromDate(this.deps.clock.now());
+    const nowMs = this.deps.clock.now().getTime();
+    const now = Timestamp.fromMillis(nowMs);
     const due = await findDueJobs(
       this.deps.db,
       now,
       this.deps.config.deletionScanBatchSize,
     );
+    // ワーカー死亡で running のまま残ったジョブの回収スキャン
+    const abandoned = await findAbandonedJobs(
+      this.deps.db,
+      Timestamp.fromMillis(nowMs - CLAIM_TTL_MS),
+      this.deps.config.deletionScanBatchSize,
+    );
     const results: JobRunResult[] = [];
-    for (const { id, data } of due) {
+    for (const { id, data } of [...due, ...abandoned]) {
       this.alertIfOverdue(id, data).catch(() => undefined);
       results.push(await this.runJob(id));
     }
@@ -86,7 +93,7 @@ export class DeletionWorker {
       (r) => !["not_due", "already_running", "already_terminal", "not_found"].includes(r.outcome),
     ).length;
     return {
-      scanned: due.length,
+      scanned: due.length + abandoned.length,
       executed,
       succeeded: results.filter((r) => r.outcome === "succeeded").length,
       failed: results.filter((r) => r.outcome.startsWith("failed")).length,
@@ -185,16 +192,23 @@ export class DeletionWorker {
     ctx: StepContext,
     collection: string,
   ): Promise<StepOutcome> {
-    const docs = await queryDocs<{ patientUid: string }>(
-      this.deps.db,
-      collection,
-      [{ field: "patientUid", op: "==", value: ctx.uid }],
-      { limit: 1000 },
-    );
-    for (const d of docs) {
-      await deleteRecursive(this.deps.db, d.path);
+    // 1000件超でも全件処理するまでページを回す（打ち切ると残骸が残る）
+    let deleted = 0;
+    for (;;) {
+      const docs = await queryDocs<{ patientUid: string }>(
+        this.deps.db,
+        collection,
+        [{ field: "patientUid", op: "==", value: ctx.uid }],
+        { limit: 1000 },
+      );
+      if (docs.length === 0) break;
+      for (const d of docs) {
+        await deleteRecursive(this.deps.db, d.path);
+      }
+      deleted += docs.length;
+      if (docs.length < 1000) break;
     }
-    return { deletedCount: docs.length };
+    return { deletedCount: deleted };
   }
 
   /** medications と ocrJobs（candidates サブコレクション含む）。 */
@@ -211,7 +225,11 @@ export class DeletionWorker {
     return { deletedCount: meds + jobs.length };
   }
 
-  /** uploads を削除し、対応 Storage オブジェクト一覧をジョブへ退避。 */
+  /**
+   * uploads を削除し、対応 Storage オブジェクト参照をジョブへ退避する。
+   * 参照はドキュメント削除「前」に永続化する。削除中に失敗しても
+   * 既削除ドキュメント分の参照が失われず、リトライで収束できる。
+   */
   private async stepUploads(ctx: StepContext): Promise<StepOutcome> {
     const uploads = await queryDocs<{
       storageBucket?: string;
@@ -220,43 +238,66 @@ export class DeletionWorker {
     }>(this.deps.db, "uploads", [
       { field: "patientUid", op: "==", value: ctx.uid },
     ]);
-    const objects: StorageObjectRef[] = [];
+    const ref = this.deps.db.doc(`deletionJobs/${ctx.jobId}`);
+
+    // 1. 参照を先にジョブへ永続化（既存の退避分とマージ・重複排除）
+    const snap = await ref.get();
+    const existing =
+      (snap.data() as DeletionJobDoc | undefined)?.pendingStorageObjects ?? [];
+    const merged = new Map<string, StorageObjectRef>();
+    for (const o of existing) {
+      merged.set(`${o.bucket}/${o.path}/${o.generation ?? ""}`, o);
+    }
     for (const u of uploads) {
-      if (u.data.objectPath) {
-        objects.push({
-          bucket: u.data.storageBucket ?? this.deps.config.storageBucket,
-          path: u.data.objectPath,
-          generation:
-            u.data.objectGeneration !== undefined
-              ? String(u.data.objectGeneration)
-              : undefined,
-        });
-      }
+      if (!u.data.objectPath) continue;
+      const obj: StorageObjectRef = {
+        bucket: u.data.storageBucket ?? this.deps.config.storageBucket,
+        path: u.data.objectPath,
+        generation:
+          u.data.objectGeneration !== undefined
+            ? String(u.data.objectGeneration)
+            : undefined,
+      };
+      merged.set(`${obj.bucket}/${obj.path}/${obj.generation ?? ""}`, obj);
+    }
+    await ref.update({ pendingStorageObjects: [...merged.values()] });
+
+    // 2. 参照の永続化後にドキュメントを削除する
+    for (const u of uploads) {
       await this.deps.db.doc(u.path).delete();
     }
-    const ref = this.deps.db.doc(`deletionJobs/${ctx.jobId}`);
-    await ref.update({ pendingStorageObjects: objects });
     return { deletedCount: uploads.length };
   }
 
-  /** uploads ステップが退避した Storage オブジェクトを削除。 */
+  /**
+   * uploads ステップが退避した Storage オブジェクトを削除する。
+   * 失敗したオブジェクトは pendingStorageObjects に残したままステップを
+   * 失敗させ、既存のリトライ機構に委ねる（成功扱いにすると画像が残る）。
+   */
   private async stepStorageObjects(ctx: StepContext): Promise<StepOutcome> {
     const ref = this.deps.db.doc(`deletionJobs/${ctx.jobId}`);
     const snap = await ref.get();
     const objects =
-      ((snap.data() as { pendingStorageObjects?: StorageObjectRef[] } | undefined)
-        ?.pendingStorageObjects) ?? [];
+      (snap.data() as DeletionJobDoc | undefined)?.pendingStorageObjects ?? [];
     let deleted = 0;
+    const remaining: StorageObjectRef[] = [];
     for (const obj of objects) {
       try {
         await this.deps.storage.deleteObject(obj.bucket, obj.path, obj.generation);
         deleted += 1;
       } catch (err) {
+        remaining.push(obj);
         this.deps.logger.warn(
           { err, jobId: ctx.jobId },
           "storage object delete failed",
         );
       }
+    }
+    if (remaining.length > 0) {
+      await ref.update({ pendingStorageObjects: remaining });
+      throw new Error(
+        `storage object deletions failed: ${remaining.length} of ${objects.length} remaining`,
+      );
     }
     await ref.update({
       pendingStorageObjects: FieldValue.delete(),
@@ -365,7 +406,23 @@ export class DeletionWorker {
         return { outcome: "already_terminal" as const };
       }
       if (job.status === "running") {
-        return { outcome: "already_running" as const };
+        // 実行中クレームは CLAIM_TTL_MS で失効する。超過した running は
+        // 前ワーカー死亡とみなして回収する（tx内なので同時回収は競合しない）。
+        const startedMs = (
+          job.lastStartedAt as { toMillis?: () => number } | undefined
+        )?.toMillis?.();
+        const stale =
+          startedMs !== undefined && nowMs - startedMs > CLAIM_TTL_MS;
+        if (!stale) {
+          return { outcome: "already_running" as const };
+        }
+        if ((job.attemptCount ?? 0) >= this.deps.config.deletionJobMaxAttempts) {
+          tx.update(ref, {
+            status: "failed",
+            lastErrorCode: "claim_abandoned",
+          });
+          return { outcome: "already_terminal" as const };
+        }
       }
       if (job.status === "failed" && job.attemptCount >= this.deps.config.deletionJobMaxAttempts) {
         return { outcome: "already_terminal" as const };

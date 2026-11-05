@@ -29,3 +29,9 @@ export function retryDelayMs(attemptCount: number): number {
 
 /** 期限超過アラートの閾値（SLO-07: 予定時刻+24h未完了）。 */
 export const OVERDUE_ALERT_MS = 24 * 3600_000;
+
+/**
+ * 実行中クレームの失効時間。running のままこの時間を超えたジョブは
+ * ワーカー死亡とみなして回収スキャンで再クレームする。
+ */
+export const CLAIM_TTL_MS = 15 * 60_000;

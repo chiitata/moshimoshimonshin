@@ -99,12 +99,13 @@ export interface DeletionJobDoc {
   completedAt?: unknown;
   cancelledAt?: unknown;
   nextAttemptAt?: unknown;
-  overdueAlertedAt?: unknown;
+  /** uploads ドキュメント削除前に退避した Storage オブジェクト参照（失敗分は残す）。 */
   pendingStorageObjects?: Array<{
     bucket: string;
     path: string;
     generation?: string;
   }>;
+  overdueAlertedAt?: unknown;
 }
 
 export interface AuditEventDoc {
