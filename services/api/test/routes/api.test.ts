@@ -362,3 +362,31 @@ describe("POST /v1/onboarding/consents", () => {
     await app.close();
   });
 });
+
+describe("internal deletion-scan", () => {
+  it("内部トークンでスキャンを実行できる", async () => {
+    const deps = makeTestDeps();
+    await seedLegalDocuments(deps);
+    const app = buildTestApp(deps);
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/internal/jobs/deletion-scan",
+      headers: { "x-internal-job-token": "test-internal-token" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().scanned).toBe(0);
+    await app.close();
+  });
+
+  it("トークン不一致は 403", async () => {
+    const deps = makeTestDeps();
+    const app = buildTestApp(deps);
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/internal/jobs/deletion-scan",
+      headers: { "x-internal-job-token": "wrong" },
+    });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+});
