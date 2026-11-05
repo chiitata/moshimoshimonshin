@@ -120,11 +120,15 @@ export async function registerEmail(
   }
 
   // ---- 必須同意・版検証（Auth作成・操作予約より前） ----
+  // 既存操作がある場合は予約時の版セット(legalVersionSet)でピン検証する。
+  // 文書版の更新をまたいだ再試行が「版不一致412」で恒久的に詰まないよう、
+  // 予約済み版を現行版より優先する（新規必須種別が追加された場合のみ現行を要求）。
   const legalDocs = await getLegalDocuments(deps.db);
   if (!legalDocs) {
     throw new ApiError(500, ErrorCodes.INTERNAL, "同意文書の設定が見つかりません。");
   }
-  const grants = validateConsentSubmission(legalDocs, body.consents);
+  const validationSet = mergeVersionSet(legalDocs, operation?.legalVersionSet);
+  const grants = validateConsentSubmission(validationSet, body.consents);
 
   const now = deps.clock.now();
   if (!operation || isExpired(operation, now)) {
@@ -132,9 +136,11 @@ export async function registerEmail(
       deps,
       operationHash,
       reqHash,
-      legalDocs,
+      buildVersionSet(validationSet),
       now,
-      operation !== undefined,
+      // 期限切れ上書き時は既存UIDを引き継ぐ。新UIDではAuth側の
+      // email-already-existsに阻まれて登録を復旧できなくなる。
+      { overwrite: operation !== undefined, uid: operation?.uid },
     );
   }
 
@@ -151,20 +157,8 @@ export async function registerEmail(
         });
       } catch (err) {
         if (isAuthError(err, "auth/email-already-exists")) {
-          await audit(deps, {
-            actorType: "service",
-            action: "REGISTRATION_ATTEMPT",
-            outcome: "conflict",
-            requestId: params.requestId,
-            resourceType: "registrationOperation",
-            resourceIdHash: operationHash.slice(0, 32),
-          });
-          throw ApiError.conflict(
-            ErrorCodes.REGISTRATION_CONFLICT,
-            "このメールアドレスでは登録できません。",
-          );
-        }
-        if (!isAuthError(err, "auth/uid-already-exists")) {
+          await reconcileEmailConflict(deps, operation, body, params, operationHash);
+        } else if (!isAuthError(err, "auth/uid-already-exists")) {
           throw err;
         }
         // uid-already-exists: 前回試行で作成済み（UIDはサーバ生成の乱数）。続行する。
@@ -174,12 +168,27 @@ export async function registerEmail(
     }
 
     // ---- Firestore transaction: account + legalConsents + operation ----
+    // 操作台帳の状態更新も同一tx内で行う。tx後に失敗すると台帳が
+    // auth_created のまま残り、同一キー再試行で同意書が二重発行されるのを防ぐ。
     if (operation.status === "auth_created" || operation.status === "reserved") {
       await deps.db.runTransaction(async (tx) => {
+        const opRef = registrationOperationRef(deps.db, operationHash);
         const accountRef = deps.db.doc(`accounts/${operation!.uid}`);
-        const accountSnap = await tx.get(accountRef);
+        const [opSnap, accountSnap] = await Promise.all([
+          tx.get(opRef),
+          tx.get(accountRef),
+        ]);
+        const committedStatus = (
+          opSnap.data() as RegistrationOperationDoc | undefined
+        )?.status;
+        if (
+          committedStatus === "consents_committed" ||
+          committedStatus === "enabled"
+        ) {
+          return;
+        }
+        const ts = FieldValue.serverTimestamp();
         if (!accountSnap.exists) {
-          const ts = FieldValue.serverTimestamp();
           const account: AccountDoc = {
             uid: operation!.uid,
             accountStatus: "onboarding_pending",
@@ -196,9 +205,13 @@ export async function registerEmail(
           );
         }
         writeConsentDocs(tx, deps, operation!.uid, grants, "email_registration");
+        tx.set(
+          opRef,
+          { status: "consents_committed", updatedAt: ts } as DocumentData,
+          { merge: true },
+        );
       });
       operation = { ...operation, status: "consents_committed" };
-      await saveOperation(deps, operationHash, { status: "consents_committed" });
     }
 
     // ---- Auth 有効化 ----
@@ -258,25 +271,113 @@ function isExpired(op: RegistrationOperationDoc, now: Date): boolean {
   return op.status === "expired" || (expMs !== undefined && expMs <= now.getTime());
 }
 
+/**
+ * 既存操作の legalVersionSet を現行文書セットへマージする。
+ * 予約時の版を優先しつつ、予約時に存在しなかった新規必須種別は現行版で要求する。
+ */
+function mergeVersionSet(
+  legalDocs: LegalDocumentSet,
+  stored: RegistrationOperationDoc["legalVersionSet"] | undefined,
+): LegalDocumentSet {
+  if (!stored || Object.keys(stored).length === 0) return legalDocs;
+  const documents: LegalDocumentSet["documents"] = { ...legalDocs.documents };
+  const required = new Set(legalDocs.requiredConsents);
+  for (const [type, v] of Object.entries(stored)) {
+    const consentType = type as keyof typeof documents;
+    documents[consentType] = {
+      version: v.version,
+      documentHash: v.documentHash,
+      publishedAt: "",
+    };
+    required.add(type as (typeof legalDocs.requiredConsents)[number]);
+  }
+  return {
+    documents,
+    requiredConsents: [...required],
+    updatedAt: legalDocs.updatedAt,
+  };
+}
+
+function buildVersionSet(
+  legalDocs: LegalDocumentSet,
+): RegistrationOperationDoc["legalVersionSet"] {
+  const set: RegistrationOperationDoc["legalVersionSet"] = {};
+  for (const type of legalDocs.requiredConsents) {
+    const doc = legalDocs.documents[type];
+    if (doc) {
+      set[type] = { version: doc.version, documentHash: doc.documentHash };
+    }
+  }
+  return set;
+}
+
+/**
+ * email-already-exists の突き合わせ。
+ * - 保持者が本操作のUIDなら前回作成済み → 続行
+ * - 保持者が「disabled かつ account 未作成」の孤児（失敗した過去登録の残骸）
+ *   なら削除して createUser を再試行 → 版更新等で残された登録を回復
+ * - 上記以外は実ユーザーのメール → 409
+ */
+async function reconcileEmailConflict(
+  deps: Deps,
+  operation: RegistrationOperationDoc,
+  body: RegisterBody,
+  params: { requestId: string },
+  operationHash: string,
+): Promise<void> {
+  const existing = await deps.authAdmin
+    .getUserByEmail(body.email)
+    .catch(() => undefined);
+  if (existing && existing.uid === operation.uid) {
+    return;
+  }
+  if (existing?.disabled) {
+    const accountSnap = await deps.db.doc(`accounts/${existing.uid}`).get();
+    if (!accountSnap.exists) {
+      // 登録未完了の孤児Authユーザーを回収し、本操作のUIDで作成し直す
+      await deps.authAdmin.deleteUser(existing.uid);
+      await deps.authAdmin.createUser({
+        uid: operation.uid,
+        email: body.email,
+        password: body.password,
+        emailVerified: false,
+        disabled: true,
+      });
+      await audit(deps, {
+        actorType: "service",
+        action: "REGISTRATION_ATTEMPT",
+        outcome: "recovered",
+        requestId: params.requestId,
+        resourceType: "registrationOperation",
+        resourceIdHash: operationHash.slice(0, 32),
+      });
+      return;
+    }
+  }
+  await audit(deps, {
+    actorType: "service",
+    action: "REGISTRATION_ATTEMPT",
+    outcome: "conflict",
+    requestId: params.requestId,
+    resourceType: "registrationOperation",
+    resourceIdHash: operationHash.slice(0, 32),
+  });
+  throw ApiError.conflict(
+    ErrorCodes.REGISTRATION_CONFLICT,
+    "このメールアドレスでは登録できません。",
+  );
+}
+
 async function reserveOperation(
   deps: Deps,
   operationHash: string,
   reqHash: string,
-  legalDocs: LegalDocumentSet,
+  legalVersionSet: RegistrationOperationDoc["legalVersionSet"],
   now: Date,
-  overwrite = false,
+  opts: { overwrite?: boolean; uid?: string | undefined } = {},
 ): Promise<RegistrationOperationDoc> {
-  const uid = deps.db.collection("registrationOperations").doc().id;
-  const legalVersionSet: RegistrationOperationDoc["legalVersionSet"] = {};
-  for (const type of legalDocs.requiredConsents) {
-    const doc = legalDocs.documents[type];
-    if (doc) {
-      legalVersionSet[type] = {
-        version: doc.version,
-        documentHash: doc.documentHash,
-      };
-    }
-  }
+  // 期限切れ上書き時は既存UIDを再利用して孤児Authとの齟齬を防ぐ
+  const uid = opts.uid ?? deps.db.collection("registrationOperations").doc().id;
   const doc: RegistrationOperationDoc = {
     operationHash,
     requestHash: reqHash,
@@ -291,7 +392,7 @@ async function reserveOperation(
   };
   const ref = registrationOperationRef(deps.db, operationHash);
   try {
-    if (overwrite) {
+    if (opts.overwrite) {
       await ref.set(doc as unknown as DocumentData);
     } else {
       await ref.create(doc as unknown as DocumentData);
