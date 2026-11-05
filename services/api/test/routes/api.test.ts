@@ -28,6 +28,21 @@ describe("GET /healthz", () => {
   });
 });
 
+describe("GET /v1/public/legal-documents", () => {
+  it("現行文書セットを返す", async () => {
+    const { app } = await setup();
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/public/legal-documents",
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.requiredConsents).toContain("terms_of_service");
+    expect(body.documents.terms_of_service.version).toBe("2026-11-01");
+    await app.close();
+  });
+});
+
 describe("認証ガード", () => {
   it("Authorization 無しは 401", async () => {
     const { app } = await setup();
@@ -99,6 +114,59 @@ describe("GET /v1/me", () => {
     expect(body.uid).toBe(UID);
     expect(body.accountStatus).toBe("pending_deletion");
     expect(body.requiredConsents.current).toBe(false);
+    await app.close();
+  });
+});
+
+describe("POST /v1/auth/register", () => {
+  const payload = {
+    email: "route@example.com",
+    password: "abcd1234",
+    consents: {
+      terms_of_service: { accepted: true, documentVersion: "2026-11-01" },
+      privacy_policy_ack: { accepted: true, documentVersion: "2026-11-01" },
+      health_data_collection: { accepted: true, documentVersion: "2026-11-01" },
+    },
+  };
+
+  it("201 + 登録結果を返す", async () => {
+    const { app } = await setup();
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/auth/register",
+      headers: { "idempotency-key": "reg-1" },
+      payload,
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().registrationStatus).toBe("created");
+    await app.close();
+  });
+
+  it("Idempotency-Key 無しは 400", async () => {
+    const { app } = await setup();
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/auth/register",
+      payload,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe("VALIDATION_FAILED");
+    await app.close();
+  });
+
+  it("レート制限超過は 429 + Retry-After", async () => {
+    const { app } = await setup();
+    let last = 0;
+    for (let i = 0; i < 7; i++) {
+      const res = await app.inject({
+        method: "POST",
+        url: "/v1/auth/register",
+        headers: { "idempotency-key": `reg-${i}` },
+        payload: { ...payload, email: `u${i}@example.com` },
+      });
+      last = res.statusCode;
+    }
+    expect(last).toBe(429);
     await app.close();
   });
 });

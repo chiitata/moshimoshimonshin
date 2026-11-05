@@ -4,6 +4,8 @@ import { resolveRequestId } from "./lib/requestId.js";
 import { ApiError, sendError } from "./lib/errors.js";
 import { enforceAccess } from "./auth/gates.js";
 import { registerHealthRoutes } from "./routes/health.js";
+import { registerPublicRoutes } from "./routes/public.js";
+import { registerAuthRoutes } from "./routes/auth.js";
 import { registerMeRoutes } from "./routes/me.js";
 
 /**
@@ -34,6 +36,8 @@ export function buildApp(deps: Deps): FastifyInstance {
   });
 
   registerHealthRoutes(app, deps);
+  registerPublicRoutes(app, deps);
+  registerAuthRoutes(app, deps);
   registerMeRoutes(app, deps);
 
   return app;
