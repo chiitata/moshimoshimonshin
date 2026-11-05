@@ -21,6 +21,7 @@ export interface AuthAdmin {
     uid: string,
     props: { disabled?: boolean; emailVerified?: boolean },
   ): Promise<unknown>;
+  getUserByEmail(email: string): Promise<{ uid: string; disabled: boolean }>;
   deleteUser(uid: string): Promise<void>;
   revokeRefreshTokens(uid: string): Promise<void>;
 }
