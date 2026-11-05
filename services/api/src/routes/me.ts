@@ -171,7 +171,7 @@ export function registerMeRoutes(app: FastifyInstance, deps: Deps): void {
         },
       },
       schema: {
-        body: emptyBodySchema,
+        body: emptyBodySchema.nullish(),
         response: {
           202: deletionStatusSchema,
           ...errors(400, 401, 403, 409, 429),
@@ -206,7 +206,7 @@ export function registerMeRoutes(app: FastifyInstance, deps: Deps): void {
         },
       },
       schema: {
-        body: emptyBodySchema,
+        body: emptyBodySchema.nullish(),
         response: {
           200: deletionStatusSchema,
           ...errors(400, 401, 403, 404, 409, 429),

@@ -316,6 +316,21 @@ describe("POST /v1/me/deletion-request → cancel → status", () => {
     await app.close();
   });
 
+  it("ボディ省略でも受理される（payload なし）", async () => {
+    const deps = makeTestDeps();
+    await seedLegalDocuments(deps);
+    await seedAccount(deps, UID);
+    const app = buildTestApp(deps);
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/me/deletion-request",
+      headers: { ...authHeader(UID), "idempotency-key": "del-nobody" },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(res.json().status).toBe("pending_deletion");
+    await app.close();
+  });
+
   it("auth_time が古いと 403 REAUTH_REQUIRED", async () => {
     const deps = makeTestDeps({ reauthWindowSeconds: 60 });
     await seedLegalDocuments(deps);

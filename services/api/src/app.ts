@@ -68,8 +68,9 @@ export function buildApp(deps: Deps): FastifyInstance {
     void reply.header("x-request-id", req.id);
   });
 
-  // ルートごとのアクセス階層を一括適用（認証→App Check→状態・同意→認可→レート）
-  app.addHook("preHandler", async (req) => enforceAccess(deps, req));
+  // ルートごとのアクセス階層を一括適用（認証→App Check→状態・同意→認可→レート）。
+  // preValidation で実行し、スキーマ検証より先に保護パイプラインを通す（02 §4）。
+  app.addHook("preValidation", async (req) => enforceAccess(deps, req));
 
   app.setErrorHandler((err, req, reply) => sendError(req, reply, err));
   app.setNotFoundHandler((req, reply) => {
