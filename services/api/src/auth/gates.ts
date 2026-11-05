@@ -4,7 +4,7 @@ import type { Deps } from "../deps.js";
 import type { ConsentState } from "./context.js";
 import { ApiError, ErrorCodes } from "../lib/errors.js";
 import { RateRules, type RateLimitRule } from "../lib/rateLimit.js";
-import { getAccount, latestGrantedByType, listConsents } from "../repos/accounts.js";
+import { getAccount, latestConsentsByType } from "../repos/accounts.js";
 import { getLegalDocuments } from "../repos/legalConfig.js";
 import { getActiveMemberships } from "../repos/facilities.js";
 import type { ConsentType, MembershipRole } from "../domain/types.js";
@@ -176,8 +176,11 @@ export async function evaluateConsents(
     throw new ApiError(500, ErrorCodes.INTERNAL, "同意文書の設定が見つかりません。");
   }
 
-  const consents = await listConsents(deps.db, uid);
-  const granted = latestGrantedByType(consents);
+  const granted = await latestConsentsByType(
+    deps.db,
+    uid,
+    legalDocs.requiredConsents,
+  );
   const missing: ConsentType[] = [];
   for (const type of legalDocs.requiredConsents) {
     const required = legalDocs.documents[type];
