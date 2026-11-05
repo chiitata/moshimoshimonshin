@@ -12,15 +12,19 @@ import { registerHealthRoutes } from "./routes/health.js";
 export function buildApp(deps: Deps): FastifyInstance {
   const app = Fastify({
     loggerInstance: deps.logger.child({ component: "http" }),
-    requestIdHeader: false,
+    // X-Request-Id を genReqId で解決し req.id と一体化する。
+    // ログ（requestId=request.id）と応答ヘッダ・エラー本文が同一IDで相関できる。
+    genReqId: (req) => {
+      const raw = req.headers["x-request-id"];
+      const header = Array.isArray(raw) ? raw[0] : raw;
+      return resolveRequestId(header);
+    },
   });
 
-  // X-Request-Id を全リクエストに付与（生成/検証）し応答ヘッダへ反映
+  // requestContext へ Fastify の req.id をそのまま格納し応答ヘッダへ反映
   app.addHook("onRequest", async (req, reply) => {
-    const raw = req.headers["x-request-id"];
-    const header = Array.isArray(raw) ? raw[0] : raw;
-    req.requestContext = { requestId: resolveRequestId(header) };
-    void reply.header("x-request-id", req.requestContext.requestId);
+    req.requestContext = { requestId: req.id };
+    void reply.header("x-request-id", req.id);
   });
 
   app.setErrorHandler((err, req, reply) => sendError(req, reply, err));
