@@ -31,6 +31,27 @@ export async function findDueJobs(
   return rows.map((r) => ({ id: r.id, data: r.data }));
 }
 
+/**
+ * running のまま放置された（クレーム失効済み）ジョブを回収対象として列挙する。
+ * findDueJobs は scheduled のみ返すため、ワーカー死亡時の復旧はこちらで拾う。
+ */
+export async function findAbandonedJobs(
+  db: FirestoreLike,
+  staleBefore: Timestamp,
+  limit: number,
+): Promise<Array<{ id: string; data: DeletionJobDoc }>> {
+  const rows = await queryDocs<DeletionJobDoc>(
+    db,
+    "deletionJobs",
+    [
+      { field: "status", op: "==", value: "running" },
+      { field: "lastStartedAt", op: "<=", value: staleBefore },
+    ],
+    { orderBy: [{ field: "lastStartedAt", direction: "asc" }], limit },
+  );
+  return rows.map((r) => ({ id: r.id, data: r.data }));
+}
+
 export async function findOpenJobForSubject(
   db: FirestoreLike,
   uid: string,

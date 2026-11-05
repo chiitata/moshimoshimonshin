@@ -157,6 +157,7 @@ export const profilePatchSchema = z
   .strict();
 export type ProfilePatch = z.infer<typeof profilePatchSchema>;
 
+// 03_機能仕様書 §3.2: 氏名・カナ・生年月日・電話番号・郵便番号・住所(都道府県/市区町村/番地) が完了必須
 export const REQUIRED_PROFILE_FIELDS = [
   "familyName",
   "givenName",
@@ -165,6 +166,7 @@ export const REQUIRED_PROFILE_FIELDS = [
   "birthDate",
   "phoneNumber",
   "postalCode",
+  "address",
 ] as const;
 
 export const emptyBodySchema = z.object({}).strict();

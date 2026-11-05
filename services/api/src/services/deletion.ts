@@ -57,9 +57,8 @@ export async function getDeletionStatus(
 ): Promise<DeletionStatusBody> {
   const account = await getAccount(deps.db, uid);
   if (!account || account.accountStatus !== "pending_deletion") {
-    const job = account?.deletionJobId
-      ? await getDeletionJob(deps.db, account.deletionJobId)
-      : undefined;
+    const jobId = account?.deletionJobId ?? account?.lastDeletionJobId;
+    const job = jobId ? await getDeletionJob(deps.db, jobId) : undefined;
     if (job?.status === "succeeded") {
       return { status: "completed", canCancel: false };
     }
@@ -98,7 +97,7 @@ export async function requestDeletion(
 ): Promise<DeletionStatusBody> {
   const graceMs = deps.config.deletionGracePeriodDays * 24 * 3600_000;
 
-  const { result } = await runIdempotent<DeletionStatusBody>(deps, {
+  const { result, replayed } = await runIdempotent<DeletionStatusBody>(deps, {
     namespace: "deletion_request",
     key: params.idempotencyKey,
     principal: params.uid,
@@ -184,11 +183,30 @@ export async function requestDeletion(
     },
   });
 
-  // トークン失効はトランザクション外でベストエフォート実行
-  try {
-    await deps.authAdmin.revokeRefreshTokens(params.uid);
-  } catch (err) {
-    deps.logger.warn({ err, uid: auditUidHash(deps, params.uid) }, "revokeRefreshTokens failed");
+  // トークン失効はトランザクション外でベストエフォート実行。
+  // 冪等リプレイ（応答喪失後の再送・取消後の再送）では、失効成功が
+  // 記録済みの場合は新規セッションを失効させない。失効未記録なら再試行する。
+  const revokeMarker = replayed
+    ? (await getAccount(deps.db, params.uid))?.deletionTokensRevokedAt
+    : undefined;
+  if (revokeMarker == null) {
+    try {
+      await deps.authAdmin.revokeRefreshTokens(params.uid);
+      await deps.db
+        .doc(`accounts/${params.uid}`)
+        .set(
+          { deletionTokensRevokedAt: FieldValue.serverTimestamp() },
+          { merge: true },
+        )
+        .catch((err) =>
+          deps.logger.warn({ err }, "deletionTokensRevokedAt write failed"),
+        );
+    } catch (err) {
+      deps.logger.warn(
+        { err, uid: auditUidHash(deps, params.uid) },
+        "revokeRefreshTokens failed",
+      );
+    }
   }
 
   return result;
@@ -250,6 +268,9 @@ export async function cancelDeletion(
         deletionRequestedAt: del,
         deletionScheduledAt: del,
         deletionJobId: del,
+        // 取消後も状態照会できるよう直近ジョブ参照を保持する
+        lastDeletionJobId: jobRef.id,
+        deletionTokensRevokedAt: del,
         updatedAt: ts,
       });
       tx.update(jobRef, { status: "cancelled", cancelledAt: ts });

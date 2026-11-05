@@ -20,6 +20,10 @@ export interface AccountDoc {
   deletionScheduledAt?: unknown;
   previousAccountStatus?: AccountStatus;
   deletionJobId?: string;
+  /** 直近の取消済みジョブ参照。取消後の状態照会に使う。 */
+  lastDeletionJobId?: string;
+  /** 退会申請に伴うリフレッシュトークン失効の成功記録。 */
+  deletionTokensRevokedAt?: unknown;
   schemaVersion: string;
   createdAt: unknown;
   updatedAt: unknown;
@@ -95,12 +99,13 @@ export interface DeletionJobDoc {
   completedAt?: unknown;
   cancelledAt?: unknown;
   nextAttemptAt?: unknown;
-  overdueAlertedAt?: unknown;
+  /** uploads ドキュメント削除前に退避した Storage オブジェクト参照（失敗分は残す）。 */
   pendingStorageObjects?: Array<{
     bucket: string;
     path: string;
     generation?: string;
   }>;
+  overdueAlertedAt?: unknown;
 }
 
 export interface AuditEventDoc {

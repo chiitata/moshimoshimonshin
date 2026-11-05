@@ -1,4 +1,8 @@
-import { FieldValue, type DocumentData } from "firebase-admin/firestore";
+import {
+  FieldValue,
+  Timestamp,
+  type DocumentData,
+} from "firebase-admin/firestore";
 import type { Deps } from "../deps.js";
 import type {
   AccountDoc,
@@ -17,6 +21,32 @@ export interface ProfileResponse {
   profileComplete: boolean;
 }
 
+function toIso(value: unknown): string | undefined {
+  if (value && typeof value === "object" && "toDate" in value) {
+    return (value as { toDate(): Date }).toDate().toISOString();
+  }
+  if (typeof value === "string") return value;
+  return undefined;
+}
+
+/**
+ * Firestore ドキュメントを API 応答形式へ変換する。
+ * Timestamp 系フィールドは 03 §4 の UTC ISO8601 契約どおり文字列化する。
+ */
+function serializeProfile(doc: PatientProfileDoc): Record<string, unknown> {
+  const { patientUid: _ignored, ...rest } = doc;
+  const out: Record<string, unknown> = { ...rest };
+  const updatedAt = toIso(rest.updatedAt);
+  if (updatedAt !== undefined) out.updatedAt = updatedAt;
+  if (Array.isArray(rest.medicalHistory)) {
+    out.medicalHistory = rest.medicalHistory.map((e) => ({
+      ...e,
+      updatedAt: toIso(e.updatedAt) ?? e.updatedAt,
+    }));
+  }
+  return out;
+}
+
 /** API-003 GET /me/profile。 */
 export async function getMyProfile(
   deps: Deps,
@@ -26,9 +56,8 @@ export async function getMyProfile(
   if (!profile) {
     throw ApiError.notFound("プロフィールが登録されていません。");
   }
-  const { patientUid: _ignored, ...rest } = profile;
   return {
-    profile: rest as Record<string, unknown>,
+    profile: serializeProfile(profile),
     profileComplete: profile.profileComplete,
   };
 }
@@ -51,7 +80,7 @@ export async function patchMyProfile(
     ]);
   }
 
-  return deps.db.runTransaction(async (tx) => {
+  await deps.db.runTransaction(async (tx) => {
     const accountRef = deps.db.doc(`accounts/${uid}`);
     const accountSnap = await tx.get(accountRef);
     if (!accountSnap.exists) {
@@ -87,10 +116,13 @@ export async function patchMyProfile(
     }
     if (patch.locale !== undefined) updates.locale = patch.locale;
     if (patch.medicalHistory !== undefined) {
+      // 配列内要素には FieldValue.serverTimestamp() を入れられない
+      // （Firestore SDK が transform-in-array を拒否する）ため具体値を使う
+      const entryTs = Timestamp.now();
       updates.medicalHistory = patch.medicalHistory.map((text) => ({
         conditionText: text,
         selfReported: true,
-        updatedAt: ts,
+        updatedAt: entryTs,
       }));
     }
 
@@ -118,11 +150,15 @@ export async function patchMyProfile(
         updatedAt: ts,
       });
     }
-
-    const { patientUid: _ignored, ...rest } = merged;
-    return {
-      profile: rest as Record<string, unknown>,
-      profileComplete: merged.profileComplete,
-    };
   });
+
+  // tx コミット後の確定値を読み直して返す（serverTimestamp の解決済み値）
+  const committed = await getProfile(deps.db, uid);
+  if (!committed) {
+    throw new ApiError(500, "INTERNAL", "プロフィールの保存に失敗しました。");
+  }
+  return {
+    profile: serializeProfile(committed),
+    profileComplete: committed.profileComplete,
+  };
 }

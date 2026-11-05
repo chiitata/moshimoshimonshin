@@ -120,14 +120,40 @@ interface ErrorReplyBody {
   };
 }
 
+/** Fastify がハンドラ到達前に返すクライアントエラー（statusCode 400系）か。 */
+function fastifyClientErrorStatus(err: unknown): number | undefined {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "statusCode" in err &&
+    typeof err.statusCode === "number" &&
+    err.statusCode >= 400 &&
+    err.statusCode < 500
+  ) {
+    return err.statusCode;
+  }
+  return undefined;
+}
+
+const CLIENT_ERROR_CODE: Record<number, ErrorCode> = {
+  400: ErrorCodes.VALIDATION_FAILED,
+  401: ErrorCodes.UNAUTHENTICATED,
+  403: ErrorCodes.FORBIDDEN,
+  404: ErrorCodes.NOT_FOUND,
+  413: ErrorCodes.FILE_TOO_LARGE,
+  415: ErrorCodes.VALIDATION_FAILED,
+  429: ErrorCodes.RATE_LIMITED,
+};
+
 export function sendError(
   request: FastifyRequest,
   reply: FastifyReply,
   err: unknown,
 ): void {
   const requestId =
-    request.requestContext?.requestId ?? resolveRequestId(undefined);
+    request.requestContext?.requestId ?? request.id ?? resolveRequestId(undefined);
   let apiError: ApiError;
+  const clientStatus = fastifyClientErrorStatus(err);
   if (isApiError(err)) {
     apiError = err;
   } else if (hasZodFastifySchemaValidationErrors(err)) {
@@ -138,15 +164,15 @@ export function sendError(
         message: issue.message ?? "不正な値です。",
       })),
     );
-  } else if (
-    typeof err === "object" &&
-    err !== null &&
-    "statusCode" in err &&
-    typeof err.statusCode === "number" &&
-    err.statusCode === 400
-  ) {
-    // JSON パースエラー等の Fastify 400 系エラー
-    apiError = new ApiError(400, ErrorCodes.VALIDATION_FAILED, "入力内容を確認してください。");
+  } else if (clientStatus !== undefined) {
+    // JSONパース失敗・非対応Content-Type・ボディ超過等のフレームワーク400系は
+    // 500ではなく元のステータスを保持した標準エラー形式で返す
+    request.log.warn({ err }, "client error");
+    apiError = new ApiError(
+      clientStatus,
+      CLIENT_ERROR_CODE[clientStatus] ?? ErrorCodes.VALIDATION_FAILED,
+      "リクエストを処理できません。",
+    );
   } else {
     request.log.error({ err }, "unhandled error");
     apiError = new ApiError(500, ErrorCodes.INTERNAL, "内部エラーが発生しました。");
