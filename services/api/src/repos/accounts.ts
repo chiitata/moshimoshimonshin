@@ -49,6 +49,37 @@ export async function listConsents(
 }
 
 /**
+ * 必須同意種別ごとの最新の有効（granted・未撤回）同意を解決する。
+ * 履歴全体を一括 limit すると hospital_disclosure 等の多量レコードで
+ * 登録時同意が押し出され得るため、種別ごとにクエリする（04_DB設計書 §5.3）。
+ */
+export async function latestConsentsByType(
+  db: FirestoreLike,
+  uid: string,
+  types: ConsentType[],
+): Promise<Map<ConsentType, LegalConsentDoc>> {
+  const result = new Map<ConsentType, LegalConsentDoc>();
+  await Promise.all(
+    types.map(async (type) => {
+      const rows = await queryDocs<LegalConsentDoc>(
+        db,
+        "legalConsents",
+        [
+          { field: "subjectUid", op: "==", value: uid },
+          { field: "consentType", op: "==", value: type },
+        ],
+        { orderBy: [{ field: "occurredAt", direction: "desc" }], limit: 200 },
+      );
+      const granted = rows.find(
+        (r) => r.data.decision === "granted" && !r.data.revokedAt,
+      );
+      if (granted) result.set(type, granted.data);
+    }),
+  );
+  return result;
+}
+
+/**
  * 各 consentType の最新の granted 同意を返す。
  * revokedAt が設定された同意は撤回済みとして除外する。
  */
