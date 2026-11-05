@@ -3,6 +3,7 @@ import type { FastifyRequest } from "fastify";
 import type { ConsentState } from "../auth/context.js";
 import { evaluateConsents } from "../auth/gates.js";
 import { getProfile } from "../repos/accounts.js";
+import { getDeletionStatus, type DeletionStatusBody } from "./deletion.js";
 
 export interface MeResponse {
   uid: string;
@@ -11,6 +12,7 @@ export interface MeResponse {
   emailVerified: boolean;
   requiredConsents: ConsentState;
   profileComplete: boolean;
+  deletionRequest: DeletionStatusBody;
 }
 
 /**
@@ -26,6 +28,7 @@ export async function getMe(deps: Deps, req: FastifyRequest): Promise<MeResponse
     ctx.consentState ?? (await evaluateConsents(deps, req));
 
   const profile = await getProfile(deps.db, uid);
+  const deletionRequest = await getDeletionStatus(deps, uid);
 
   return {
     uid,
@@ -36,5 +39,6 @@ export async function getMe(deps: Deps, req: FastifyRequest): Promise<MeResponse
     emailVerified: ctx.auth?.emailVerified ?? account?.emailVerified ?? false,
     requiredConsents: consentState,
     profileComplete: profile?.profileComplete ?? false,
+    deletionRequest,
   };
 }

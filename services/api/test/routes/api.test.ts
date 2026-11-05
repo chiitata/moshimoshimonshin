@@ -136,6 +136,7 @@ describe("GET /v1/me", () => {
     expect(body.uid).toBe(UID);
     expect(body.accountStatus).toBe("pending_deletion");
     expect(body.requiredConsents.current).toBe(false);
+    expect(body.deletionRequest.status).toBe("pending_deletion");
     await app.close();
   });
 });
@@ -262,6 +263,71 @@ describe("POST /v1/auth/register", () => {
       last = res.statusCode;
     }
     expect(last).toBe(429);
+    await app.close();
+  });
+});
+
+describe("POST /v1/me/deletion-request → cancel → status", () => {
+  it("申請→状態確認→取消の一連の流れ", async () => {
+    const deps = makeTestDeps();
+    await seedLegalDocuments(deps);
+    await seedAccount(deps, UID);
+    const app = buildTestApp(deps);
+
+    const del = await app.inject({
+      method: "POST",
+      url: "/v1/me/deletion-request",
+      headers: { ...authHeader(UID), "idempotency-key": "del-1" },
+      payload: {},
+    });
+    expect(del.statusCode).toBe(202);
+    expect(del.json().status).toBe("pending_deletion");
+
+    const status = await app.inject({
+      method: "GET",
+      url: "/v1/me/deletion-request",
+      headers: authHeader(UID),
+    });
+    expect(status.json().status).toBe("pending_deletion");
+    expect(status.json().canCancel).toBe(true);
+
+    // pending_deletion 中は profile PATCH は遮断
+    const blocked = await app.inject({
+      method: "PATCH",
+      url: "/v1/me/profile",
+      headers: authHeader(UID),
+      payload: { familyName: "x" },
+    });
+    expect(blocked.statusCode).toBe(403);
+
+    const cancel = await app.inject({
+      method: "POST",
+      url: "/v1/me/deletion-request/cancel",
+      headers: { ...authHeader(UID), "idempotency-key": "del-c1" },
+      payload: {},
+    });
+    expect(cancel.statusCode).toBe(200);
+    expect(cancel.json().status).toBe("cancelled");
+    await app.close();
+  });
+
+  it("auth_time が古いと 403 REAUTH_REQUIRED", async () => {
+    const deps = makeTestDeps({ reauthWindowSeconds: 60 });
+    await seedLegalDocuments(deps);
+    await seedAccount(deps, UID);
+    deps.fakeAuth.authTimeByToken.set(
+      `token-${UID}`,
+      Math.floor(deps.clock.now().getTime() / 1000) - 3600,
+    );
+    const app = buildTestApp(deps);
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/me/deletion-request",
+      headers: { ...authHeader(UID), "idempotency-key": "del-1" },
+      payload: {},
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe("REAUTH_REQUIRED");
     await app.close();
   });
 });
