@@ -5,6 +5,7 @@ import {
   authHeader,
   buildTestApp,
   seedAccount,
+  seedCurrentConsents,
   seedLegalDocuments,
 } from "../helpers/app.js";
 
@@ -96,6 +97,27 @@ describe("認証ガード", () => {
     expect(ok.statusCode).toBe(200);
     await app.close();
   });
+
+  it("pending_deletion は通常 API を遮断し /me と退会APIは通る", async () => {
+    const deps = makeTestDeps();
+    await seedLegalDocuments(deps);
+    await seedAccount(deps, UID, { accountStatus: "pending_deletion" });
+    const app = buildTestApp(deps);
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/me/profile",
+      headers: authHeader(UID),
+    });
+    expect(res.statusCode).toBe(403);
+
+    const me = await app.inject({
+      method: "GET",
+      url: "/v1/me",
+      headers: authHeader(UID),
+    });
+    expect(me.statusCode).toBe(200);
+    await app.close();
+  });
 });
 
 describe("GET /v1/me", () => {
@@ -114,6 +136,79 @@ describe("GET /v1/me", () => {
     expect(body.uid).toBe(UID);
     expect(body.accountStatus).toBe("pending_deletion");
     expect(body.requiredConsents.current).toBe(false);
+    await app.close();
+  });
+});
+
+describe("PATCH /v1/me/profile", () => {
+  it("同意未完了（legal_pending）は 412 で保存しない", async () => {
+    const deps = makeTestDeps();
+    await seedLegalDocuments(deps);
+    await seedAccount(deps, UID, {
+      accountStatus: "onboarding_pending",
+      onboardingState: "legal_pending",
+    });
+    const app = buildTestApp(deps);
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/v1/me/profile",
+      headers: authHeader(UID),
+      payload: { familyName: "田中" },
+    });
+    expect(res.statusCode).toBe(412);
+    expect((await deps.db.doc(`patientProfiles/${UID}`).get()).exists).toBe(
+      false,
+    );
+    await app.close();
+  });
+
+  it("現行同意済みなら保存され、必須項目充足で active になる", async () => {
+    const deps = makeTestDeps();
+    await seedLegalDocuments(deps);
+    await seedAccount(deps, UID, {
+      accountStatus: "onboarding_pending",
+      onboardingState: "profile_pending",
+    });
+    await seedCurrentConsents(deps, UID);
+    const app = buildTestApp(deps);
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/v1/me/profile",
+      headers: authHeader(UID),
+      payload: {
+        familyName: "田中",
+        givenName: "太郎",
+        familyNameKana: "タナカ",
+        givenNameKana: "タロウ",
+        birthDate: "1990-05-15",
+        phoneNumber: "09012345678",
+        postalCode: "1234567",
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().profileComplete).toBe(true);
+    const account = await deps.db.doc(`accounts/${UID}`).get();
+    expect(account.data()!.accountStatus).toBe("active");
+    expect(account.data()!.onboardingState).toBe("completed");
+    await app.close();
+  });
+
+  it("バリデーションエラーは 400 + fieldErrors", async () => {
+    const deps = makeTestDeps();
+    await seedLegalDocuments(deps);
+    await seedAccount(deps, UID);
+    await seedCurrentConsents(deps, UID);
+    const app = buildTestApp(deps);
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/v1/me/profile",
+      headers: authHeader(UID),
+      payload: { birthDate: "2999-01-01" },
+    });
+    expect(res.statusCode).toBe(400);
+    const body = res.json();
+    expect(body.error.code).toBe("VALIDATION_FAILED");
+    expect(body.error.fieldErrors.length).toBeGreaterThan(0);
     await app.close();
   });
 });
@@ -167,6 +262,37 @@ describe("POST /v1/auth/register", () => {
       last = res.statusCode;
     }
     expect(last).toBe(429);
+    await app.close();
+  });
+});
+
+describe("POST /v1/onboarding/consents", () => {
+  it("現行同意の記録で profile_pending に進む", async () => {
+    const deps = makeTestDeps();
+    await seedLegalDocuments(deps);
+    const app = buildTestApp(deps);
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/onboarding/consents",
+      headers: { ...authHeader("new-user"), "idempotency-key": "oc-1" },
+      payload: {
+        consents: {
+          terms_of_service: { accepted: true, documentVersion: "2026-11-01" },
+          privacy_policy_ack: { accepted: true, documentVersion: "2026-11-01" },
+          health_data_collection: {
+            accepted: true,
+            documentVersion: "2026-11-01",
+          },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().onboardingState).toBe("profile_pending");
+    const consents = await deps.db
+      .collection("legalConsents")
+      .where("subjectUid", "==", "new-user")
+      .get();
+    expect(consents.size).toBe(3);
     await app.close();
   });
 });
