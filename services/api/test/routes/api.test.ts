@@ -363,6 +363,34 @@ describe("POST /v1/onboarding/consents", () => {
   });
 });
 
+describe("GET /docs (OpenAPI)", () => {
+  it("仕様 JSON を返し、主要ルートを含む", async () => {
+    const deps = makeTestDeps();
+    const app = buildTestApp(deps);
+    await app.ready();
+    const res = await app.inject({ method: "GET", url: "/docs/json" });
+    expect(res.statusCode).toBe(200);
+    const spec = res.json();
+    expect(spec.openapi).toMatch(/^3\./);
+    for (const p of [
+      "/healthz",
+      "/v1/auth/register",
+      "/v1/me",
+      "/v1/me/deletion-request",
+      "/v1/internal/jobs/deletion-scan",
+    ]) {
+      expect(spec.paths[p]).toBeTruthy();
+    }
+    // zod ボディスキーマが JSON Schema 化されている
+    const registerBody =
+      spec.paths["/v1/auth/register"].post.requestBody.content[
+        "application/json"
+      ].schema;
+    expect(registerBody.type).toBe("object");
+    await app.close();
+  });
+});
+
 describe("internal deletion-scan", () => {
   it("内部トークンでスキャンを実行できる", async () => {
     const deps = makeTestDeps();

@@ -1,8 +1,4 @@
-import {
-  FieldValue,
-  Timestamp,
-  type DocumentData,
-} from "firebase-admin/firestore";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import type { Deps } from "../deps.js";
 import type { DeletionJobDoc } from "../domain/firestoreDocs.js";
 import type { DeletionStepStatus } from "../domain/types.js";

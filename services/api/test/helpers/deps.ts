@@ -35,6 +35,7 @@ export function makeTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     hmacSecret: "test-hmac-secret",
     appCheckMode: "permissive",
     internalJobToken: "test-internal-token",
+    apiDocsEnabled: true,
     reauthWindowSeconds: 900,
     deletionGracePeriodDays: 30,
     deletionJobMaxAttempts: 5,

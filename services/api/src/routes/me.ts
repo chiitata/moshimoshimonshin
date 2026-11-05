@@ -1,8 +1,13 @@
 import type { FastifyInstance } from "fastify";
+import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import type { Deps } from "../deps.js";
 import { requireFreshAuth } from "../auth/gates.js";
 import { requireIdempotencyKey } from "../lib/idempotency.js";
-import { emptyBodySchema } from "../domain/schemas.js";
+import {
+  emptyBodySchema,
+  onboardingConsentsBodySchema,
+  profilePatchSchema,
+} from "../domain/schemas.js";
 import { assertParsed } from "../lib/errors.js";
 import { RateRules } from "../lib/rateLimit.js";
 import { getMe } from "../services/me.js";
@@ -14,17 +19,26 @@ import {
   requestDeletion,
 } from "../services/deletion.js";
 import { latestGrantedByType, listConsents } from "../repos/accounts.js";
+import {
+  consentsResponseSchema,
+  deletionStatusSchema,
+  errors,
+  meResponseSchema,
+  onboardingResponseSchema,
+  profileResponseSchema,
+} from "./apiDocs.js";
 
 /**
  * 患者向けアカウント・同意・退会 API（API-001〜008）。
  * uid は検証済みトークンから解決し、URLにユーザーIDを置かない（03 §4.1）。
  */
 export function registerMeRoutes(app: FastifyInstance, deps: Deps): void {
+  const typed = app.withTypeProvider<ZodTypeProvider>();
   const uidOf = (req: { requestContext: { auth?: { uid: string } } }) =>
     req.requestContext.auth!.uid;
 
   // API-001
-  app.get(
+  typed.get(
     "/v1/me",
     {
       config: {
@@ -34,30 +48,66 @@ export function registerMeRoutes(app: FastifyInstance, deps: Deps): void {
           allowSuspended: true,
         },
       },
+      schema: {
+        response: { 200: meResponseSchema, ...errors(401, 403, 500) },
+        tags: ["me"],
+        summary: "アカウント状態・同意状態・完了度",
+        security: [{ bearerAuth: [] }],
+      },
     },
     async (req) => getMe(deps, req),
   );
 
   // API-003
-  app.get(
+  typed.get(
     "/v1/me/profile",
-    { config: { access: { tier: "authenticated" } } },
+    {
+      config: { access: { tier: "authenticated" } },
+      schema: {
+        response: { 200: profileResponseSchema, ...errors(401, 403, 404) },
+        tags: ["me"],
+        summary: "プロフィール取得",
+        security: [{ bearerAuth: [] }],
+      },
+    },
     async (req) => getMyProfile(deps, uidOf(req)),
   );
 
   // API-002
-  app.patch(
+  typed.patch(
     "/v1/me/profile",
-    { config: { access: { tier: "consented" } } },
+    {
+      config: { access: { tier: "consented" } },
+      schema: {
+        body: profilePatchSchema,
+        response: {
+          200: profileResponseSchema,
+          ...errors(400, 401, 403, 412),
+        },
+        tags: ["me"],
+        summary: "プロフィール更新（現行同意必須）",
+        security: [{ bearerAuth: [] }],
+      },
+    },
     async (req) => patchMyProfile(deps, uidOf(req), req.body),
   );
 
   // API-004
-  app.post(
+  typed.post(
     "/v1/onboarding/consents",
     {
       config: {
         access: { tier: "authenticated", rateRule: RateRules.consents },
+      },
+      schema: {
+        body: onboardingConsentsBodySchema,
+        response: {
+          200: onboardingResponseSchema,
+          ...errors(400, 401, 403, 409, 412, 429),
+        },
+        tags: ["me"],
+        summary: "同意記録（Idempotency-Key 必須）",
+        security: [{ bearerAuth: [] }],
       },
     },
     async (req) => {
@@ -75,9 +125,17 @@ export function registerMeRoutes(app: FastifyInstance, deps: Deps): void {
   );
 
   // API-005
-  app.get(
+  typed.get(
     "/v1/consents",
-    { config: { access: { tier: "authenticated" } } },
+    {
+      config: { access: { tier: "authenticated" } },
+      schema: {
+        response: { 200: consentsResponseSchema, ...errors(401, 403) },
+        tags: ["me"],
+        summary: "同意履歴と現行版マッピング",
+        security: [{ bearerAuth: [] }],
+      },
+    },
     async (req) => {
       const consents = await listConsents(deps.db, uidOf(req));
       return {
@@ -102,7 +160,7 @@ export function registerMeRoutes(app: FastifyInstance, deps: Deps): void {
   );
 
   // API-006
-  app.post(
+  typed.post(
     "/v1/me/deletion-request",
     {
       config: {
@@ -111,6 +169,16 @@ export function registerMeRoutes(app: FastifyInstance, deps: Deps): void {
           allowPendingDeletion: true,
           rateRule: RateRules.deletionRequest,
         },
+      },
+      schema: {
+        body: emptyBodySchema,
+        response: {
+          202: deletionStatusSchema,
+          ...errors(400, 401, 403, 409, 429),
+        },
+        tags: ["me"],
+        summary: "退会申請（30日保留・再認証必須・Idempotency-Key 必須）",
+        security: [{ bearerAuth: [] }],
       },
     },
     async (req, reply) => {
@@ -127,7 +195,7 @@ export function registerMeRoutes(app: FastifyInstance, deps: Deps): void {
   );
 
   // API-007
-  app.post(
+  typed.post(
     "/v1/me/deletion-request/cancel",
     {
       config: {
@@ -136,6 +204,16 @@ export function registerMeRoutes(app: FastifyInstance, deps: Deps): void {
           allowPendingDeletion: true,
           rateRule: RateRules.deletionRequest,
         },
+      },
+      schema: {
+        body: emptyBodySchema,
+        response: {
+          200: deletionStatusSchema,
+          ...errors(400, 401, 403, 404, 409, 429),
+        },
+        tags: ["me"],
+        summary: "退会申請の取消（再認証・Idempotency-Key 必須）",
+        security: [{ bearerAuth: [] }],
       },
     },
     async (req) => {
@@ -151,11 +229,17 @@ export function registerMeRoutes(app: FastifyInstance, deps: Deps): void {
   );
 
   // API-008
-  app.get(
+  typed.get(
     "/v1/me/deletion-request",
     {
       config: {
         access: { tier: "authenticated", allowPendingDeletion: true },
+      },
+      schema: {
+        response: { 200: deletionStatusSchema, ...errors(401, 403) },
+        tags: ["me"],
+        summary: "退会申請の状態照会",
+        security: [{ bearerAuth: [] }],
       },
     },
     async (req) => getDeletionStatus(deps, uidOf(req)),

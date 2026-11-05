@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { hasZodFastifySchemaValidationErrors } from "fastify-type-provider-zod";
 import { type ZodError } from "zod";
 import { resolveRequestId } from "./requestId.js";
 
@@ -129,6 +130,23 @@ export function sendError(
   let apiError: ApiError;
   if (isApiError(err)) {
     apiError = err;
+  } else if (hasZodFastifySchemaValidationErrors(err)) {
+    // fastify-type-provider-zod の validatorCompiler が返すルートスキーマ検証エラー
+    apiError = ApiError.validation(
+      err.validation.map((issue) => ({
+        field: issue.instancePath.replace(/^\//u, "").replace(/\//gu, ".") || "(root)",
+        message: issue.message ?? "不正な値です。",
+      })),
+    );
+  } else if (
+    typeof err === "object" &&
+    err !== null &&
+    "statusCode" in err &&
+    typeof err.statusCode === "number" &&
+    err.statusCode === 400
+  ) {
+    // JSON パースエラー等の Fastify 400 系エラー
+    apiError = new ApiError(400, ErrorCodes.VALIDATION_FAILED, "入力内容を確認してください。");
   } else {
     request.log.error({ err }, "unhandled error");
     apiError = new ApiError(500, ErrorCodes.INTERNAL, "内部エラーが発生しました。");
