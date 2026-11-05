@@ -183,6 +183,11 @@ describe("PATCH /v1/me/profile", () => {
         birthDate: "1990-05-15",
         phoneNumber: "09012345678",
         postalCode: "1234567",
+        address: {
+          prefecture: "東京都",
+          city: "渋谷区",
+          line1: "神南1-1-1",
+        },
       },
     });
     expect(res.statusCode).toBe(200);
