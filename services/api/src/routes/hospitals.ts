@@ -227,27 +227,47 @@ export function registerHospitalRoutes(app: FastifyInstance, deps: Deps): void {
 
       const delivery = await getDeliveryRecord(deps.db, deliveryId);
       if (!delivery || delivery.data.facilityId !== facilityId) {
+        // 存在の有無も区別しない（E2E-004）
+        await audit(deps, {
+          actorType: "staff",
+          actorUidHash: auditUidHash(deps, uidOf(req)),
+          action: AUDIT_ACTIONS.DELIVERY_ACKNOWLEDGED,
+          resourceType: "delivery",
+          resourceIdHash: auditResourceHash(deps, deliveryId),
+          facilityId,
+          decision: "deny",
+          requestId: req.id,
+        });
         throw ApiError.notFound();
       }
 
       const now = deps.clock.now();
-      await acknowledgeDelivery(deps.db, deliveryId, uidOf(req), now);
+      const { alreadyAcknowledged, acknowledgedAt } = await acknowledgeDelivery(
+        deps.db,
+        deliveryId,
+        uidOf(req),
+        now,
+      );
 
-      await audit(deps, {
-        actorType: "staff",
-        actorUidHash: auditUidHash(deps, uidOf(req)),
-        action: AUDIT_ACTIONS.DELIVERY_ACKNOWLEDGED,
-        resourceType: "delivery",
-        resourceIdHash: auditResourceHash(deps, deliveryId),
-        facilityId,
-        decision: "allow",
-        requestId: req.id,
-      });
+      // 冪等な再受領では状態遷移が起きていないため監査は発行しない
+      if (!alreadyAcknowledged) {
+        await audit(deps, {
+          actorType: "staff",
+          actorUidHash: auditUidHash(deps, uidOf(req)),
+          action: AUDIT_ACTIONS.DELIVERY_ACKNOWLEDGED,
+          resourceType: "delivery",
+          resourceIdHash: auditResourceHash(deps, deliveryId),
+          facilityId,
+          decision: "allow",
+          requestId: req.id,
+        });
+      }
 
       return {
         deliveryId,
         status: "acknowledged" as const,
-        acknowledgedAt: now.toISOString(),
+        acknowledgedAt:
+          toIso(acknowledgedAt) ?? now.toISOString(),
       };
     },
   );

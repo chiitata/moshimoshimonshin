@@ -50,6 +50,7 @@ export async function createDelivery(
     senderUid: string;
     body: DeliveryCreateBody;
     idempotencyKey: string;
+    requestId?: string;
   },
 ): Promise<DeliveryCreateResult> {
   const { senderUid, body, idempotencyKey } = params;
@@ -158,6 +159,7 @@ export async function createDelivery(
           resourceIdHash: auditResourceHash(deps, deliveryId),
           facilityId: body.facilityId,
           decision: "allow",
+          ...(params.requestId ? { requestId: params.requestId } : {}),
         }),
       );
 
@@ -172,7 +174,7 @@ export async function createDelivery(
 
 export async function getDeliveryForSender(
   deps: Deps,
-  params: { senderUid: string; deliveryId: string },
+  params: { senderUid: string; deliveryId: string; requestId?: string },
 ): Promise<DeliveryGetResult> {
   const { senderUid, deliveryId } = params;
   const doc = await getDelivery(deps.db, deliveryId);
@@ -189,6 +191,7 @@ export async function getDeliveryForSender(
     resourceIdHash: auditResourceHash(deps, deliveryId),
     facilityId: doc.facilityId,
     decision: "allow",
+    ...(params.requestId ? { requestId: params.requestId } : {}),
   });
 
   return {

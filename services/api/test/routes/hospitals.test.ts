@@ -267,6 +267,74 @@ describe("hospital receive routes (#18, API-031〜033)", () => {
       expect((res.json() as { status: string }).status).toBe("acknowledged");
     });
 
+    it("受領確認で DELIVERY_ACKNOWLEDGED 監査が記録される", async () => {
+      const { deps, app } = await setup();
+      await seedMembership(deps, STAFF_A, FACILITY_A);
+      await seedDelivery(deps, "d-ack-audit", FACILITY_A);
+
+      await app.inject({
+        method: "POST",
+        url: `/v1/hospitals/${FACILITY_A}/deliveries/d-ack-audit/acknowledge`,
+        headers: authHeader(STAFF_A),
+      });
+
+      const audits = await deps.db.collection("auditEvents").get();
+      const events = audits.docs
+        .map((d) => d.data())
+        .filter((e) => e["action"] === "DELIVERY_ACKNOWLEDGED");
+      expect(events).toHaveLength(1);
+      expect(events[0]!["decision"]).toBe("allow");
+      expect(events[0]!["facilityId"]).toBe(FACILITY_A);
+      // 生IDは保存しない
+      expect(events[0]!["resourceIdHash"]).not.toBe("d-ack-audit");
+    });
+
+    it("冪等な再受領は元の acknowledgedAt を返し監査を重複発行しない", async () => {
+      const { deps, app } = await setup();
+      await seedMembership(deps, STAFF_A, FACILITY_A);
+      const originalAck = Timestamp.fromDate(new Date("2026-01-02T03:04:05Z"));
+      await seedDelivery(deps, "d-ack-idem", FACILITY_A, {
+        status: "acknowledged",
+        acknowledgedAt: originalAck,
+      });
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/v1/hospitals/${FACILITY_A}/deliveries/d-ack-idem/acknowledge`,
+        headers: authHeader(STAFF_A),
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { acknowledgedAt: string };
+      expect(body.acknowledgedAt).toBe("2026-01-02T03:04:05.000Z");
+
+      const audits = await deps.db.collection("auditEvents").get();
+      const events = audits.docs
+        .map((d) => d.data())
+        .filter((e) => e["action"] === "DELIVERY_ACKNOWLEDGED");
+      expect(events).toHaveLength(0);
+    });
+
+    it("他院deliveryの受領確認拒否も deny 監査が記録される（E2E-004）", async () => {
+      const { deps, app } = await setup();
+      await seedMembership(deps, STAFF_A, FACILITY_A);
+      await seedDelivery(deps, "d-ack-deny", FACILITY_B);
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/v1/hospitals/${FACILITY_A}/deliveries/d-ack-deny/acknowledge`,
+        headers: authHeader(STAFF_A),
+      });
+      expect(res.statusCode).toBe(404);
+
+      const audits = await deps.db.collection("auditEvents").get();
+      const events = audits.docs
+        .map((d) => d.data())
+        .filter(
+          (e) => e["action"] === "DELIVERY_ACKNOWLEDGED" && e["decision"] === "deny",
+        );
+      expect(events).toHaveLength(1);
+    });
+
     it("他院のdeliveryは404", async () => {
       const { deps, app } = await setup();
       await seedMembership(deps, STAFF_A, FACILITY_A);

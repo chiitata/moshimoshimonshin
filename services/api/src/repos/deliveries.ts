@@ -120,8 +120,9 @@ export async function acknowledgeDelivery(
   deliveryId: string,
   staffUid: string,
   now: Date,
-): Promise<{ alreadyAcknowledged: boolean }> {
+): Promise<{ alreadyAcknowledged: boolean; acknowledgedAt: unknown }> {
   let alreadyAcknowledged = false;
+  let acknowledgedAt: unknown = null;
   await db.runTransaction(async (tx) => {
     const ref = deliveriesCollection(db).doc(deliveryId);
     const snap = await tx.get(ref);
@@ -129,14 +130,16 @@ export async function acknowledgeDelivery(
     const data = snap.data() as DeliveryDoc;
     if (data.status === "acknowledged") {
       alreadyAcknowledged = true;
+      acknowledgedAt = data.acknowledgedAt ?? null;
       return;
     }
+    acknowledgedAt = Timestamp.fromDate(now);
     tx.update(ref, {
       status: "acknowledged",
-      acknowledgedAt: Timestamp.fromDate(now),
+      acknowledgedAt,
       receivedByStaffUid: staffUid,
       updatedAt: FieldValue.serverTimestamp(),
     });
   });
-  return { alreadyAcknowledged };
+  return { alreadyAcknowledged, acknowledgedAt };
 }
