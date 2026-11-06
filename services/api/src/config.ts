@@ -16,6 +16,7 @@ const envSchema = z.object({
    * クライアントが署名URLでアクセスする側の Storage Emulator ホスト。
    * Docker Compose では FIREBASE_STORAGE_EMULATOR_HOST は内部DNS名
    * （firebase:9199）でブラウザから解決不能なため、公開側を別途設定する。
+   * ブラウザから到達できるループバック（localhost/127.0.0.1）のみ許可する。
    */
   FIREBASE_STORAGE_EMULATOR_PUBLIC_HOST: z.string().optional(),
   FIREBASE_DATABASE_EMULATOR_HOST: z.string().optional(),
@@ -109,6 +110,16 @@ export type AppConfig = Readonly<{
 
 const DUMMY_SECRETS = new Set(["", "change-me-local-dev"]);
 
+/** Admin SDK 側の内部エミュレータ接続先。Compose の `firebase` も許可する。 */
+const INTERNAL_HOST_PORT = /^(localhost|127\.0\.0\.1|firebase):([1-9]\d{0,4})$/;
+/** 署名URLを扱う公開ホスト。ブラウザから到達できるループバックのみ許可する。 */
+const PUBLIC_HOST_PORT = /^(localhost|127\.0\.0\.1):([1-9]\d{0,4})$/;
+
+function isValidHostPort(value: string, pattern: RegExp): boolean {
+  const match = pattern.exec(value);
+  return match !== null && Number(match[2]) <= 65535;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.parse(env);
 
@@ -136,10 +147,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (emulator && emulatorHosts.some((host) => host === undefined)) {
     throw new Error("Auth, Firestore, Storage and RTDB emulator hosts must all be set");
   }
-  if (emulator && emulatorHosts.some((host) => {
-    const match = /^(localhost|127\.0\.0\.1|firebase):([1-9]\d{0,4})$/.exec(host!);
-    return !match || Number(match[2]) > 65535;
-  })) {
+  if (emulator && emulatorHosts.some((host) => !isValidHostPort(host!, INTERNAL_HOST_PORT))) {
     throw new Error("Firebase emulator hosts must use local or Compose addresses and valid ports");
   }
   if (!emulator && parsed.FIREBASE_STORAGE_EMULATOR_PUBLIC_HOST !== undefined) {
@@ -148,6 +156,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (parsed.FIREBASE_STORAGE_EMULATOR_PUBLIC_HOST !== undefined &&
       !parsed.FIREBASE_STORAGE_EMULATOR_PUBLIC_HOST.trim()) {
     throw new Error("Storage emulator public host must not be empty");
+  }
+  if (parsed.FIREBASE_STORAGE_EMULATOR_PUBLIC_HOST !== undefined &&
+      !isValidHostPort(parsed.FIREBASE_STORAGE_EMULATOR_PUBLIC_HOST, PUBLIC_HOST_PORT)) {
+    throw new Error(
+      "Storage emulator public host must be a localhost or 127.0.0.1 address with a valid port",
+    );
+  }
+  if (emulator && parsed.FIREBASE_STORAGE_EMULATOR_HOST?.startsWith("firebase:") &&
+      parsed.FIREBASE_STORAGE_EMULATOR_PUBLIC_HOST === undefined) {
+    throw new Error("A loopback Storage emulator public host is required for Compose");
   }
   if (emulator && !projectId.startsWith("demo-")) {
     throw new Error("Firebase emulators require a demo- project ID");

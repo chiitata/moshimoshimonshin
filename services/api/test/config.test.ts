@@ -59,6 +59,24 @@ describe("Firebase connection configuration", () => {
     expect(() => loadConfig({ ...local, FIREBASE_STORAGE_EMULATOR_PUBLIC_HOST: "" })).toThrow();
   });
 
+  it("accepts a loopback public Storage host for the browser", () => {
+    expect(loadConfig({ ...local, FIREBASE_STORAGE_EMULATOR_PUBLIC_HOST: "127.0.0.1:9199" }))
+      .toMatchObject({ emulator: true, storageEmulatorPublicHost: "127.0.0.1:9199" });
+  });
+
+  it("requires a loopback public Storage host when the internal host is Compose DNS", () => {
+    const { FIREBASE_STORAGE_EMULATOR_PUBLIC_HOST: _publicHost, ...withoutPublic } = local;
+    expect(() => loadConfig(withoutPublic)).toThrow("public host is required");
+    expect(loadConfig({ ...withoutPublic, FIREBASE_STORAGE_EMULATOR_HOST: "127.0.0.1:9199" }).emulator).toBe(true);
+  });
+
+  it.each([
+    "example.com:9199", "firebase.googleapis.com:443", "firebase:9199",
+    "http://localhost:9199", "localhost:0", "localhost:65536", " localhost:9199",
+  ])("rejects non-browser-reachable or invalid public Storage host %s", (host) => {
+    expect(() => loadConfig({ ...local, FIREBASE_STORAGE_EMULATOR_PUBLIC_HOST: host })).toThrow();
+  });
+
   it("still requires a production secret for cloud mode", () => {
     expect(() => loadConfig({ NODE_ENV: "production", FIREBASE_PROJECT_ID: "real-project" })).toThrow("SERVER_HMAC_SECRET");
   });
