@@ -236,7 +236,15 @@ class MemQuery {
           const snapData = first.data!();
           if (snapData) {
             const vals = this.orders.map((o) => getField(snapData, o.field));
-            results = results.filter((r) => this.sortsAfterValues(r, vals));
+            const cursorId = first.ref!.path!.split("/").pop()!;
+            // 実Firestoreの暗黙__name__タイブレークを再現:
+            // 全ソートキーが同値でもdocIDが後なら「後」とみなす
+            results = results.filter(
+              (r) =>
+                this.sortsAfterValues(r, vals) ||
+                (this.orders.every((o, i) => compare(getField(r.data()!, o.field), vals[i]) === 0) &&
+                  r.id > cursorId),
+            );
           }
         }
       } else {
