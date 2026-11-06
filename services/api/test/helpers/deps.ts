@@ -64,6 +64,8 @@ export function makeTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     vertexAiModel: "gemini-2.5-flash-lite",
     vertexAiLocation: "asia-northeast1",
     vertexAiTimeoutMs: 10_000,
+    healthzProbeTimeoutMs: 2_000,
+    healthzProbeCacheMs: 5_000,
     ...overrides,
   });
 }
