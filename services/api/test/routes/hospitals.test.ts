@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it } from "vitest";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import type { FastifyInstance } from "fastify";
 import { makeTestDeps, type TestDeps } from "../helpers/deps.js";

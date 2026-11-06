@@ -118,7 +118,10 @@ export function registerHospitalRoutes(app: FastifyInstance, deps: Deps): void {
       const result = await listDeliveriesByFacility(
         deps.db,
         req.params.facilityId,
-        { cursor: req.query.cursor, limit: req.query.limit },
+        {
+          ...(req.query.cursor !== undefined && { cursor: req.query.cursor }),
+          ...(req.query.limit !== undefined && { limit: req.query.limit }),
+        },
       );
       return {
         deliveries: result.items.map((item) => ({
