@@ -114,9 +114,47 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   const projectId =
     parsed.FIREBASE_PROJECT_ID ?? parsed.GCLOUD_PROJECT ?? "demo-mmr-dev";
-  const emulator = Boolean(
-    parsed.FIRESTORE_EMULATOR_HOST || parsed.FIREBASE_AUTH_EMULATOR_HOST,
-  );
+  if (parsed.FIREBASE_PROJECT_ID && parsed.GCLOUD_PROJECT &&
+      parsed.FIREBASE_PROJECT_ID !== parsed.GCLOUD_PROJECT) {
+    throw new Error("FIREBASE_PROJECT_ID and GCLOUD_PROJECT must match");
+  }
+  // Admin SDKs select their endpoints independently; a partial setup could
+  // otherwise disable production safeguards while still reaching cloud services.
+  const emulatorHosts = [
+    parsed.FIRESTORE_EMULATOR_HOST,
+    parsed.FIREBASE_AUTH_EMULATOR_HOST,
+    parsed.FIREBASE_STORAGE_EMULATOR_HOST,
+    parsed.FIREBASE_DATABASE_EMULATOR_HOST,
+  ];
+  if (parsed.DATABASE_EMULATOR_HOST !== undefined) {
+    throw new Error("Use FIREBASE_DATABASE_EMULATOR_HOST instead of DATABASE_EMULATOR_HOST");
+  }
+  if (emulatorHosts.some((host) => host !== undefined && host.trim() === "")) {
+    throw new Error("Firebase emulator hosts must not be empty");
+  }
+  const emulator = emulatorHosts.some((host) => host !== undefined);
+  if (emulator && emulatorHosts.some((host) => host === undefined)) {
+    throw new Error("Auth, Firestore, Storage and RTDB emulator hosts must all be set");
+  }
+  if (emulator && emulatorHosts.some((host) => {
+    const match = /^(localhost|127\.0\.0\.1|firebase):([1-9]\d{0,4})$/.exec(host!);
+    return !match || Number(match[2]) > 65535;
+  })) {
+    throw new Error("Firebase emulator hosts must use local or Compose addresses and valid ports");
+  }
+  if (!emulator && parsed.FIREBASE_STORAGE_EMULATOR_PUBLIC_HOST !== undefined) {
+    throw new Error("Storage emulator public host requires all emulator hosts");
+  }
+  if (parsed.FIREBASE_STORAGE_EMULATOR_PUBLIC_HOST !== undefined &&
+      !parsed.FIREBASE_STORAGE_EMULATOR_PUBLIC_HOST.trim()) {
+    throw new Error("Storage emulator public host must not be empty");
+  }
+  if (emulator && !projectId.startsWith("demo-")) {
+    throw new Error("Firebase emulators require a demo- project ID");
+  }
+  if (!emulator && projectId.startsWith("demo-")) {
+    throw new Error("A non-demo Firebase project ID is required without emulators");
+  }
   const appCheckMode =
     parsed.APP_CHECK_MODE ?? (emulator ? "permissive" : "enforce");
 
