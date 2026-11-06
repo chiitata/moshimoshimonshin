@@ -190,6 +190,17 @@ describe("POST /v1/operator/facilities/:facilityId/verify", () => {
         })
       ).statusCode,
     ).toBe(409);
+    // facilityId の文字種違反（doc パス分断）は400
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/v1/operator/facilities/bad%20id/verify",
+          headers: authHeader(OP),
+          payload: body,
+        })
+      ).statusCode,
+    ).toBe(400);
     await app.close();
   });
 

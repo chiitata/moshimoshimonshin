@@ -53,15 +53,15 @@ export async function createOcrJobForUpload(
     await ref.create(doc as unknown as DocumentData);
   } catch (err) {
     // 既にジョブがある（同時作成 or 過去のジョブ）。最新を再利用する。
-    const existing = await latestOcrJobForUpload(deps.db, params.uploadId);
-    if (!existing) throw err; // 作成失敗が競合以外なら再送出
+    const prior = await latestOcrJobForUpload(deps.db, params.uploadId);
+    if (!prior) throw err; // 作成失敗が競合以外なら再送出
     if (
-      existing.data.status === "queued" &&
-      existing.data.dispatchState !== "enqueued"
+      prior.data.status === "queued" &&
+      prior.data.dispatchState !== "enqueued"
     ) {
-      await enqueue(deps, existing.id);
+      await enqueue(deps, prior.id);
     }
-    return { jobId: existing.id, created: false };
+    return { jobId: prior.id, created: false };
   }
   await enqueue(deps, ref.id);
   return { jobId: ref.id, created: true };

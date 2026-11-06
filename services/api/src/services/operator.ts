@@ -46,6 +46,7 @@ export async function verifyFacility(
       "承認には4検証項目（実在・申請者・受信担当者・所在地）が全て必要です。",
     );
   }
+  const now = deps.clock.now();
   const committedAudits: AuditEventDoc[] = [];
   await deps.db.runTransaction(async (tx) => {
     // tx リトライ時にロールバック済みイベントが残らないよう各試行でリセット
@@ -62,7 +63,7 @@ export async function verifyFacility(
         "この施設は既に承認済みです。",
       );
     }
-    const verifiedAt = Timestamp.fromDate(deps.clock.now());
+    const verifiedAt = Timestamp.fromDate(now);
     await tx.update(ref, {
       verificationStatus: "verified",
       verifiedAt,
@@ -98,7 +99,7 @@ export async function verifyFacility(
   return {
     facilityId: params.facilityId,
     verificationStatus: "verified",
-    verifiedAt: deps.clock.now().toISOString(),
+    verifiedAt: now.toISOString(),
   };
 }
 
