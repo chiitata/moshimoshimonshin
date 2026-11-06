@@ -23,6 +23,13 @@ bool allows(String screen, PatientAccessSnapshot snapshot) =>
     );
 
 void main() {
+  test('a completed deletion job on a deleted account never grants access', () {
+    final payload = response()
+      ..['accountStatus'] = 'deleted'
+      ..['deletionRequest'] = {'status': 'completed', 'canCancel': false};
+    expect(allows('P-010', parse(payload)), isFalse);
+  });
+
   test('converts the actual response shape for an authenticated user', () {
     final snapshot = parse(response());
     expect(allows('P-010', snapshot), isTrue);
@@ -109,5 +116,25 @@ void main() {
       ..['profileComplete'] = false;
     expect(allows('P-002', parse(newAccount)), isTrue);
     expect(allows('P-010', parse(newAccount)), isFalse);
+  });
+
+  test('a signed-in /me response without an account fails closed', () {
+    // The API can report a live session before the accounts document exists:
+    // accountStatus null, consents already current, onboarding profile_pending.
+    // PATCH profile then fails with 403, so until the server resolves the
+    // account no screen may open. This is still valid /v1/me JSON and must
+    // not throw during conversion.
+    final payload = response()
+      ..['accountStatus'] = null
+      ..['onboardingState'] = 'profile_pending'
+      ..['profileComplete'] = false;
+    final snapshot = parse(payload);
+    expect(snapshot.accountStatus, isNull);
+    expect(snapshot.onboardingState, 'profile_pending');
+    expect(snapshot.requiredConsentsCurrent, isTrue);
+    expect(snapshot.profileComplete, isFalse);
+    for (final screen in ['P-002', 'P-006', 'P-007', 'P-010', 'P-041']) {
+      expect(allows(screen, snapshot), isFalse, reason: screen);
+    }
   });
 }

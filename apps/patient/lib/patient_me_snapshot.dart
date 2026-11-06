@@ -75,11 +75,18 @@ PatientAccessSnapshot patientAccessSnapshotFromMe(
             'completed',
           }.contains(deletionStatus)) ||
       (status != 'pending_deletion' &&
+          status != 'deleted' &&
           {
             'pending_deletion',
             'processing',
             'completed',
           }.contains(deletionStatus))) {
+    invalid();
+  }
+  // A deleted account may have a completed historical job, but never an
+  // in-progress job. Screen access still blocks every deleted account.
+  if (status == 'deleted' &&
+      {'pending_deletion', 'processing'}.contains(deletionStatus)) {
     invalid();
   }
   for (final key in [

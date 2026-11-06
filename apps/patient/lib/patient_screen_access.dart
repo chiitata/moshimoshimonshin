@@ -44,8 +44,10 @@ bool canAccessPatientScreen({
     'P-031',
     'P-032',
     'P-033',
-    'P-040',
   };
+
+  // Reauthentication for deletion is not represented in this snapshot yet.
+  // Keep P-040 unavailable until the flow can verify it explicitly.
 
   if (auth == PatientAuthState.unknown) return false;
   if (auth == PatientAuthState.unauthenticated) {

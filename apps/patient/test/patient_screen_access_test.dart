@@ -2,6 +2,24 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:patient/patient_screen_access.dart';
 
 void main() {
+  test(
+    'deletion request remains unavailable without reauthentication state',
+    () {
+      expect(
+        canAccessPatientScreen(
+          screenId: 'P-040',
+          auth: PatientAuthState.authenticated,
+          me: const PatientAccessSnapshot(
+            accountStatus: 'active',
+            onboardingState: 'completed',
+            requiredConsentsCurrent: true,
+            profileComplete: true,
+          ),
+        ),
+        isFalse,
+      );
+    },
+  );
   const active = PatientAccessSnapshot(
     accountStatus: 'active',
     onboardingState: 'completed',
