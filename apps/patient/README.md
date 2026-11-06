@@ -10,9 +10,17 @@ Flutter の Android / iOS / Web 向けデモ雛形です。現在は準備画面
 
 ### ブラウザで画面を確認する
 
-`nix develop` に入った後、リポジトリルートで `make up` を実行し、Firefox 等で http://localhost:5050 を開きます。Flutter の `web-server` を使うため、Flutter が Chrome を検出できなくてもブラウザから開けます。実データではなく合成データだけを使ってください。
+Flutter SDK を PATH に設定した上で、リポジトリルートで `make up` を実行し、Firefox 等で http://localhost:5050 を開きます。Nix を利用する場合は、先に `nix develop` に入ることで Flutter を利用できます。Flutter の `web-server` を使うため、Flutter が Chrome を検出できなくてもブラウザから開けます。実データではなく合成データだけを使ってください。
 
-画面だけ確認する場合は、リポジトリルートから次を実行します。準備完了後に表示される URL を開き、確認が終わったら **Ctrl+C** でそのプレビューだけを停止します。`home` や `symptom` は、該当プレビューの実装があるブランチで利用できます。
+画面だけ確認する場合は、Flutter SDK（CI は 3.47.4 を使用）と Bash を用意し、リポジトリルートから次のいずれかを実行します。Windows の場合は WSL 上の Bash を使用してください。Nix は不要です。準備完了後に表示される URL を開き、確認が終わったら **Ctrl+C** でそのプレビューだけを停止します。`home` や `symptom` は、該当プレビューの実装があるブランチで利用できます。
+
+```sh
+bash apps/patient/preview.sh welcome
+bash apps/patient/preview.sh home
+bash apps/patient/preview.sh symptom
+```
+
+Nix を使う場合は、ホストに Flutter をインストールせず次のようにも実行できます。
 
 ```sh
 nix develop --command bash apps/patient/preview.sh welcome
