@@ -1,0 +1,47 @@
+/**
+ * 監査イベント名の正本（06 §6・04 §5.12）。
+ * 新しい監査イベントは必ずここに登録してから発行する。
+ * 命名は SNAKE_UPPER で統一（過去の `intake.finalized` 混入を防ぐ）。
+ *
+ * 全イベント共通の禁則（06 §6 禁止列・04 §5.12）:
+ * 問診本文・症状・薬剤名・氏名住所・パスワード・トークン・署名URL・
+ * 処方箋画像URLを details・属性に含めない。
+ * 識別子は actorUidHash / resourceIdHash の HMAC 済み値のみ。
+ */
+export const AUDIT_ACTIONS = {
+  // ---- 認証 ----
+  /** Bearer 提示したが検証失敗（UID不明のため actorUidHash なし）。 */
+  AUTH_FAIL: "AUTH_FAIL",
+  // ---- 登録 ----
+  REGISTRATION_ATTEMPT: "REGISTRATION_ATTEMPT",
+  /** Auth作成後の Firestore 失敗からの復旧（将来の repair 経路用）。 */
+  REGISTRATION_REPAIRED: "REGISTRATION_REPAIRED",
+  // ---- 同意 ----
+  CONSENT_ACCEPTED: "CONSENT_ACCEPTED",
+  // ---- 問診 ----
+  INTAKE_FINALIZED: "INTAKE_FINALIZED",
+  /** 患者本人による問診/問診票の閲覧（不正アクセス追跡）。 */
+  INTAKE_READ: "INTAKE_READ",
+  // ---- アップロード ----
+  UPLOAD_INIT: "UPLOAD_INIT",
+  UPLOAD_COMPLETED: "UPLOAD_COMPLETED",
+  // ---- 薬剤 ----
+  MEDICATION_CREATED: "MEDICATION_CREATED",
+  MEDICATION_UPDATED: "MEDICATION_UPDATED",
+  MEDICATION_DELETED: "MEDICATION_DELETED",
+  // ---- OCR ----
+  OCR_JOB_SUCCEEDED: "OCR_JOB_SUCCEEDED",
+  OCR_JOB_FAILED: "OCR_JOB_FAILED",
+  // ---- 配送・施設（#17〜#20 で発行予定） ----
+  SUBMISSION_ACCEPTED: "SUBMISSION_ACCEPTED",
+  DELIVERY_CREATED: "DELIVERY_CREATED",
+  DELIVERY_VIEWED: "DELIVERY_VIEWED",
+  HOSPITAL_READ: "HOSPITAL_READ",
+  MEMBERSHIP_REVOKED: "MEMBERSHIP_REVOKED",
+  // ---- 削除 ----
+  ACCOUNT_DELETION_REQUESTED: "ACCOUNT_DELETION_REQUESTED",
+  ACCOUNT_DELETION_CANCELLED: "ACCOUNT_DELETION_CANCELLED",
+  ACCOUNT_PURGED: "ACCOUNT_PURGED",
+} as const;
+
+export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

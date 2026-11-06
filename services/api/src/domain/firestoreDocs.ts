@@ -18,6 +18,7 @@ import type {
   UploadSourcePurpose,
   UploadStatus,
 } from "./types.js";
+import type { AuditAction } from "./auditEvents.js";
 import type { OcrCandidate } from "./ocr.js";
 
 /** Timestamp は Timestamp（fake側も同型）として扱う。 */
@@ -333,7 +334,7 @@ export interface QuestionnaireRevisionDoc {
 export interface AuditEventDoc {
   actorType: "patient" | "staff" | "platform" | "service";
   actorUidHash?: string;
-  action: string;
+  action: AuditAction;
   resourceType?: string;
   resourceIdHash?: string;
   facilityId?: string;
