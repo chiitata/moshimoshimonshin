@@ -9,8 +9,10 @@ import {
   type OcrEngineResult,
 } from "../domain/ocr.js";
 import { countPdfPages } from "../domain/uploads.js";
-import { audit, auditUidHash } from "../lib/audit.js";
+import { audit, auditResourceHash, auditUidHash } from "../lib/audit.js";
+import { AUDIT_ACTIONS } from "../domain/auditEvents.js";
 import { getDoc } from "../repos/helpers.js";
+import { notifyPatient } from "../services/notifications.js";
 
 export interface OcrRunResult {
   jobId: string;
@@ -29,7 +31,13 @@ type ClaimResult =
   | { kind: "claimed"; job: OcrJobDoc; owner: string }
   | { kind: "not_found" }
   | { kind: "already_running" }
-  | { kind: "already_terminal"; errorCode?: OcrFailureCode };
+  | { kind: "already_terminal"; errorCode?: OcrFailureCode }
+  // claim tx 内で新たに終端化した経路（監査発行のため既存終端と区別する）
+  | {
+      kind: "terminalized";
+      errorCode: OcrFailureCode;
+      patientUid: string;
+    };
 
 /**
  * OCRワーカー（02 §8, FR-O01〜O07）。Cloud Tasks の HTTP タスクまたは
@@ -54,6 +62,22 @@ export class OcrWorker {
           jobId,
           outcome: "already_terminal",
           ...(claim.errorCode !== undefined ? { errorCode: claim.errorCode } : {}),
+        };
+      case "terminalized":
+        // claim tx が今回新たに終端化した経路。finish() を通らないため
+        // ここで OCR_JOB_FAILED を記録する
+        await audit(this.deps, {
+          actorType: "service",
+          actorUidHash: auditUidHash(this.deps, claim.patientUid),
+          action: AUDIT_ACTIONS.OCR_JOB_FAILED,
+          resourceType: "ocrJobs",
+          resourceIdHash: auditResourceHash(this.deps, jobId),
+          details: { errorCode: claim.errorCode },
+        });
+        return {
+          jobId,
+          outcome: "already_terminal",
+          errorCode: claim.errorCode,
         };
     }
     const { job, owner } = claim;
@@ -145,8 +169,9 @@ export class OcrWorker {
             updatedAt: now,
           });
           return {
-            kind: "already_terminal",
+            kind: "terminalized",
             errorCode: "worker_interrupted",
+            patientUid: job.patientUid,
           } as const;
         }
         // 未到達ならこのまま再claim（下の共通claim処理へ）
@@ -159,8 +184,9 @@ export class OcrWorker {
           updatedAt: now,
         });
         return {
-          kind: "already_terminal",
+          kind: "terminalized",
           errorCode: "worker_interrupted",
+          patientUid: job.patientUid,
         } as const;
       }
 
@@ -244,20 +270,35 @@ export class OcrWorker {
     if (result.ok) {
       await audit(this.deps, {
         actorType: "service",
-        action: "OCR_JOB_SUCCEEDED",
+        actorUidHash: auditUidHash(this.deps, job.patientUid),
+        action: AUDIT_ACTIONS.OCR_JOB_SUCCEEDED,
         resourceType: "ocrJobs",
-        resourceIdHash: jobId,
+        resourceIdHash: auditResourceHash(this.deps, jobId),
         details: { candidateCount: result.candidates.length, attempt },
       });
     } else if (outcome === "failed_terminal") {
       await audit(this.deps, {
         actorType: "service",
         actorUidHash: auditUidHash(this.deps, job.patientUid),
-        action: "OCR_JOB_FAILED",
+        action: AUDIT_ACTIONS.OCR_JOB_FAILED,
         resourceType: "ocrJobs",
-        resourceIdHash: jobId,
+        resourceIdHash: auditResourceHash(this.deps, jobId),
         details: { errorCode: result.code, attempt },
       });
+    }
+
+    // 実遷移がコミットされた場合のみ通知（applied=true で claim 所有者のみ到達）。
+    // 通知失敗はワーカー処理を止めない（notifyPatient 内部で握り潰す）。
+    if (result.ok) {
+      try {
+        await notifyPatient(this.deps, {
+          patientUid: job.patientUid,
+          template: "OCR_EXTRACTION_READY",
+          refId: jobId,
+        });
+      } catch (err) {
+        this.deps.logger.warn({ err, jobId }, "ocr completion notify failed");
+      }
     }
     return {
       jobId,

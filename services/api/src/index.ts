@@ -14,6 +14,10 @@ import { DummyOcrEngine } from "./engines/dummyOcr.js";
 import { DummyLlmAdapter } from "./engines/dummyLlm.js";
 import { VertexAiLlmAdapter } from "./engines/vertexLlm.js";
 import { CloudTasksOcrQueue } from "./tasks.js";
+import { GooglePlacesGateway } from "./engines/googlePlaces.js";
+import { DummyPlacesGateway } from "./engines/dummyPlaces.js";
+import { AdminPushGateway, DisabledPushGateway } from "./push.js";
+import { getMessaging } from "firebase-admin/messaging";
 import { createOcrJobForUpload } from "./services/ocr.js";
 import { OcrWorker } from "./workers/ocrJob.js";
 import { DEV_LEGAL_DOCUMENTS } from "./domain/legalDocuments.js";
@@ -66,6 +70,15 @@ async function main(): Promise<void> {
             timeoutMs: config.vertexAiTimeoutMs,
           })
         : new DummyLlmAdapter(),
+    placesGateway:
+      config.googlePlacesApiKey !== undefined && config.googlePlacesApiKey !== ""
+        ? new GooglePlacesGateway(config.googlePlacesApiKey)
+        : new DummyPlacesGateway(),
+    // FCMはエミュレートされない。開発/エミュレータは送信無効（disabled で
+    // トークン保持・監査記録なし）、本番のみ Admin SDK で送信する。
+    pushGateway: config.emulator
+      ? new DisabledPushGateway(logger)
+      : new AdminPushGateway(getMessaging(firebase.app)),
     rateLimiter: new RateLimiter(systemClock),
     clock: systemClock,
     logger,

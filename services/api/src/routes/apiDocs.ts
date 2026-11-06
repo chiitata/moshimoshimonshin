@@ -3,6 +3,7 @@ import { z } from "zod";
 /**
  * OpenAPI 応答スキーマ。ドキュメント用途のため loose object で定義し、
  * 実応答の追加フィールドを剥がさない（serializer の安全側）。
+ * 例外: 法務文書の公開面はフィールドを契約で precise に固定する。
  */
 
 export const apiErrorSchema = z
@@ -27,13 +28,24 @@ export function errors(
 }
 
 export const healthResponseSchema = z.object({
-  status: z.string().describe("ok"),
-  service: z.string().describe("mmr-api"),
+  status: z.enum(["ok", "degraded"]),
+  service: z.literal("mmr-api"),
   emulator: z.boolean(),
+  checks: z.object({
+    firestore: z.enum(["ok", "error"]),
+  }),
+  checkedAt: z.string().describe("ISO8601"),
 });
 
 export const legalDocumentsResponseSchema = z.object({
-  documents: z.record(z.string(), z.unknown()),
+  documents: z.record(
+    z.string(),
+    z.object({
+      version: z.string(),
+      documentHash: z.string(),
+      publishedAt: z.string(),
+    }),
+  ),
   requiredConsents: z.array(z.string()),
   updatedAt: z.string().nullable(),
 });
@@ -368,4 +380,48 @@ export const questionnaireDetailResponseSchema = z.object({
     summaryReviewConfirmedAt: z.string().nullable(),
     createdAt: z.string().nullable(),
   }),
+});
+
+export const deliveryCreateResponseSchema = z.object({
+  deliveryId: z.string(),
+  status: z.literal("created"),
+});
+
+export const deliveryGetResponseSchema = z.object({
+  deliveryId: z.string(),
+  status: z.string(),
+  facilityId: z.string(),
+  questionnaireId: z.string(),
+  questionnaireRevisionId: z.string(),
+  createdAt: z.string().nullable(),
+  deliveredAt: z.string().nullable(),
+  acknowledgedAt: z.string().nullable(),
+});
+
+export const facilitySearchItemSchema = z.object({
+  source: z.literal("places"),
+  placeId: z.string(),
+  displayName: z.string(),
+  formattedAddress: z.string(),
+  lat: z.number(),
+  lng: z.number(),
+  primaryType: z.string().nullable(),
+  receivingEnabled: z.boolean(),
+  verifiedFacilityId: z.string().nullable(),
+});
+
+export const facilitySearchResponseSchema = z.object({
+  facilities: z.array(facilitySearchItemSchema),
+});
+
+export const facilityDetailResponseSchema = z.object({
+  facilityId: z.string(),
+  displayName: z.string(),
+  formattedAddress: z.string(),
+  verificationStatus: z.string(),
+  receivingEnabled: z.boolean(),
+});
+
+export const deviceRegisterResponseSchema = z.object({
+  deviceId: z.string(),
 });

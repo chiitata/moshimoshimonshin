@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CONSENT_TYPES } from "./types.js";
 import { UPLOAD_ALLOWED_MIME_TYPES } from "./uploads.js";
 import { BODY_LOCATIONS, INTAKE_SYMPTOM_MAX_CHARS } from "./intake.js";
 
@@ -24,13 +25,7 @@ const consentEntrySchema = z.object({
 /** 同意マップ: 既知の consentType のみ受理する。省略可能（partial）。 */
 export const consentMapSchema = z
   .partialRecord(
-    z.enum([
-      "terms_of_service",
-      "privacy_policy_ack",
-      "health_data_collection",
-      "hospital_disclosure",
-      "optional_analytics",
-    ]),
+    z.enum(CONSENT_TYPES),
     consentEntrySchema,
   )
   .refine((m) => Object.keys(m).length > 0, {
@@ -336,3 +331,32 @@ export const intakeFinalizeSchema = z
   })
   .strict();
 export type IntakeFinalizeBody = z.infer<typeof intakeFinalizeSchema>;
+
+/** API-029 POST /deliveries（03 §5.4）。Idempotency-Key ヘッダ必須。 */
+export const deliveryCreateSchema = z
+  .object({
+    questionnaireId: z.string().min(1).max(200),
+    questionnaireRevision: z.number().int().min(1),
+    facilityId: z.string().min(1).max(200),
+    consentDocumentVersion: z.string().min(1).max(100),
+    shareScope: z.object({
+      includeProfile: z.boolean(),
+      includeConfirmedMedications: z.boolean(),
+      includePrescriptionImages: z.boolean(),
+    }),
+  })
+  .strict();
+export type DeliveryCreateBody = z.infer<typeof deliveryCreateSchema>;
+
+/**
+ * API-042 POST /me/devices。FCM登録トークンとプラットフォーム。
+ * token は Firebase installation/token 由来の不透明文字列（内容は検証しない）。
+ */
+export const deviceRegisterBodySchema = z
+  .object({
+    token: z.string().min(10).max(4096),
+    platform: z.enum(["android", "ios", "web"]),
+  })
+  .strict();
+
+export type DeviceRegisterBody = z.infer<typeof deviceRegisterBodySchema>;

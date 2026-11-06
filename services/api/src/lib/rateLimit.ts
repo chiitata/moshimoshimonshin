@@ -65,4 +65,10 @@ export const RateRules = {
   uploadInit: { limit: 20, windowMs: 60_000 },
   uploadComplete: { limit: 30, windowMs: 60_000 },
   intakeNextQuestion: { limit: 30, windowMs: 60_000 },
+  /** 公開文書・施設検索等の読み取り系。CGNATでIP共有するため余裕を持たせる。 */
+  publicRead: { limit: 60, windowMs: 60_000 },
+  /** 認証失敗監査の書込上限（トークンSpamによるコスト増幅を抑止）。 */
+  authFailAudit: { limit: 30, windowMs: 60_000 },
+  /** プッシュデバイス登録（トークン再発行・端末切替に余裕を持たせる）。 */
+  deviceRegister: { limit: 30, windowMs: 60_000 },
 } as const satisfies Record<string, RateLimitRule>;

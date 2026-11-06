@@ -87,6 +87,15 @@ export class ApiError extends Error {
   static conflict(code: ErrorCode, message: string) {
     return new ApiError(409, code, message);
   }
+
+  static upstreamUnavailable(service = "upstream") {
+    return new ApiError(
+      503,
+      ErrorCodes.UPSTREAM_UNAVAILABLE,
+      `外部サービスが利用できません（${service}）。`,
+      { retryable: true },
+    );
+  }
 }
 
 export function isApiError(e: unknown): e is ApiError {
@@ -155,6 +164,11 @@ export function sendError(
   let apiError: ApiError;
   const clientStatus = fastifyClientErrorStatus(err);
   if (isApiError(err)) {
+    // 意図した 5xx（UPSTREAM_UNAVAILABLE・設定不備 INTERNAL 等）も運用検知の
+    // ためログに残す。4xx は正常系エラーのため記録しない
+    if (err.statusCode >= 500) {
+      request.log.warn({ err }, "handled server error");
+    }
     apiError = err;
   } else if (hasZodFastifySchemaValidationErrors(err)) {
     // fastify-type-provider-zod の validatorCompiler が返すルートスキーマ検証エラー

@@ -9,6 +9,12 @@ import type {
   LlmAdapter,
   OcrEngine,
   OcrTaskQueue,
+  PlacesGateway,
+  PlacesSearchParams,
+  PlaceResult,
+  PushFailureCode,
+  PushGateway,
+  PushSendResult,
   QuestionGenInput,
   QuestionGenOutput,
   StorageGateway,
@@ -281,6 +287,46 @@ export class FakeContentScanner implements ContentScanner {
     return this.verdict === "rejected"
       ? { verdict: "rejected", ...(this.reason !== undefined ? { reason: this.reason } : {}) }
       : { verdict: "clean" };
+  }
+}
+
+/** テスト用 Places Gateway。事前にシードした結果を返す。 */
+export class FakePlacesGateway implements PlacesGateway {
+  results: PlaceResult[] = [];
+  calls: PlacesSearchParams[] = [];
+  shouldThrow: unknown = null;
+
+  async searchNearby(params: PlacesSearchParams): Promise<PlaceResult[]> {
+    this.calls.push(params);
+    if (this.shouldThrow !== null) return Promise.reject(this.shouldThrow);
+    return this.results;
+  }
+}
+
+/** テスト用 PushGateway。送信内容を記録し、結果を制御できる。 */
+export class FakePushGateway implements PushGateway {
+  calls: Array<{
+    token: string;
+    title: string;
+    body: string;
+    data?: Record<string, string>;
+  }> = [];
+  /** トークン単位の失敗コード（未設定は成功）。 */
+  failByToken = new Map<string, PushFailureCode>();
+  /** 例外送出（sendToDevice自体のthrow経路の検証用）。 */
+  shouldThrow = false;
+
+  async sendToDevice(params: {
+    token: string;
+    title: string;
+    body: string;
+    data?: Record<string, string>;
+  }): Promise<PushSendResult> {
+    this.calls.push(params);
+    if (this.shouldThrow) throw new Error("push/send-threw");
+    const code = this.failByToken.get(params.token);
+    if (code) return { ok: false, code };
+    return { ok: true, messageId: `msg-${this.calls.length}` };
   }
 }
 
