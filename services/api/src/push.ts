@@ -25,8 +25,9 @@ export function classifyMessagingError(err: unknown): PushFailureCode {
     case "messaging/installation-id-not-registered":
       return "unregistered";
     case "messaging/invalid-registration-token":
-    case "messaging/invalid-argument":
       return "invalid_token";
+    // invalid-argument はメッセージレベルの汎用エラーでありトークン起因とは
+    // 限らないため、誤ってデバイスを無効化しないよう unknown に倒す。
     case "messaging/server-unavailable":
     case "messaging/internal-error":
     case "messaging/unavailable":
@@ -62,7 +63,8 @@ export class AdminPushGateway implements PushGateway {
 
 /**
  * エミュレータ/未設定環境用: FCMはエミュレートされないため送信せず、
- * unavailable を返してトークンを有効のまま保持する。
+ * disabled を返す。トークンは有効のまま保持し、意図的スキップのため
+ * NOTIFICATION_FAILED 監査も記録しない（呼び出し側で除外）。
  */
 export class DisabledPushGateway implements PushGateway {
   constructor(
@@ -79,6 +81,6 @@ export class DisabledPushGateway implements PushGateway {
       { tokenLen: params.token.length },
       "push disabled (emulator): skipped FCM send",
     );
-    return { ok: false, code: "unavailable" };
+    return { ok: false, code: "disabled" };
   }
 }

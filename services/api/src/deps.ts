@@ -200,6 +200,9 @@ export type PushFailureCode =
   | "invalid_token"
   /** FCM側一時障害。トークンは有効のまま保持する。 */
   | "unavailable"
+  /** ゲートウェイ無効化（エミュレータ）。送信スキップであり、
+   *  トークン保持・監査記録なしで扱う。 */
+  | "disabled"
   /** 分類不能。 */
   | "unknown";
 

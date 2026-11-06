@@ -293,7 +293,7 @@ export function registerMeRoutes(app: FastifyInstance, deps: Deps): void {
         }),
         response: {
           204: z.null(),
-          ...errors(400, 401, 403, 404),
+          ...errors(400, 401, 403, 404, 412, 429),
         },
         tags: ["me"],
         summary: "プッシュ通知デバイス解除",

@@ -12,6 +12,10 @@ import type {
   PushDeviceDoc,
 } from "../../src/domain/firestoreDocs.js";
 import { classifyMessagingError } from "../../src/push.js";
+import {
+  invalidatePushDevice,
+} from "../../src/repos/pushDevices.js";
+import { Timestamp } from "firebase-admin/firestore";
 
 const UID = "u-notify-1";
 const TOKEN = "tok-active-1";
@@ -209,6 +213,47 @@ describe("notifyPatient", () => {
     expect(events[0]!.details).toMatchObject({ errorCode: "unavailable" });
   });
 
+  it("disabled（エミュレータ送信無効）はトークン保持・監査も記録しない", async () => {
+    const deps = makeTestDeps();
+    const id = await seedDevice(deps, TOKEN);
+    deps.fakePush.failByToken.set(TOKEN, "disabled");
+    await notifyPatient(deps, { patientUid: UID, template: "OCR_EXTRACTION_READY" });
+    const doc = (
+      await deps.db.doc(`pushDevices/${id}`).get()
+    ).data() as PushDeviceDoc;
+    expect(doc.status).toBe("active");
+    expect(await auditEvents(deps)).toHaveLength(0);
+  });
+
+  it("送信試行後に再登録された端末は無効化で上書きしない", async () => {
+    const deps = makeTestDeps();
+    const id = await seedDevice(deps, TOKEN);
+    // 送信試行時点で観測した lastSeenAt
+    const seen = Timestamp.fromMillis(1000);
+    await deps.db.doc(`pushDevices/${id}`).update({ lastSeenAt: seen });
+    // その後の再登録で lastSeenAt が進む（status=active のまま）
+    await deps.db
+      .doc(`pushDevices/${id}`)
+      .update({ lastSeenAt: Timestamp.fromMillis(2000) });
+
+    await invalidatePushDevice(deps.db, id, "unregistered", seen);
+    const doc = (
+      await deps.db.doc(`pushDevices/${id}`).get()
+    ).data() as PushDeviceDoc;
+    expect(doc.status).toBe("active");
+
+    // lastSeenAt が変わっていなければ無効化する
+    await deps.db
+      .doc(`pushDevices/${id}`)
+      .update({ lastSeenAt: seen });
+    await invalidatePushDevice(deps.db, id, "unregistered", seen);
+    const doc2 = (
+      await deps.db.doc(`pushDevices/${id}`).get()
+    ).data() as PushDeviceDoc;
+    expect(doc2.status).toBe("invalid");
+    expect(doc2.invalidatedReason).toBe("unregistered");
+  });
+
   it("送信実装が例外を投げても呼び出し側へ伝播しない", async () => {
     const deps = makeTestDeps();
     await seedDevice(deps, TOKEN);
@@ -243,7 +288,8 @@ describe("classifyMessagingError", () => {
     // FID ベース登録を潰す経路でも返り得るエラー
     ["messaging/installation-id-not-registered", "unregistered"],
     ["messaging/invalid-registration-token", "invalid_token"],
-    ["messaging/invalid-argument", "invalid_token"],
+    // invalid-argument はメッセージレベル汎用エラーのため unknown（誤無効化防止）
+    ["messaging/invalid-argument", "unknown"],
     ["messaging/server-unavailable", "unavailable"],
     ["messaging/internal-error", "unavailable"],
     ["messaging/something-else", "unknown"],

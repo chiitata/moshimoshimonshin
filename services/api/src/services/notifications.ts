@@ -121,8 +121,20 @@ export async function notifyPatient(
         continue;
       }
 
+      if (result.code === "disabled") {
+        // エミュレータ等で送信自体が無効。失敗でも成功でもないため
+        // 監査・無効化は行わない。
+        continue;
+      }
       if (result.code === "unregistered" || result.code === "invalid_token") {
-        await invalidatePushDevice(deps.db, device.id, result.code);
+        // 送信試行時点の lastSeenAt を渡し、その間の再登録を無効化で
+        // 上書きしない（楽観的チェック、repos/pushDevices.ts 参照）。
+        await invalidatePushDevice(
+          deps.db,
+          device.id,
+          result.code,
+          device.data.lastSeenAt,
+        );
       }
       await audit(deps, {
         actorType: "service",

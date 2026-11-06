@@ -390,7 +390,7 @@ export interface AuditEventDoc {
 }
 
 /**
- * pushDevices/{deviceId}（04 §5.24、FCM送信基盤）。
+ * pushDevices/{deviceId}（04 §5.15、FCM送信基盤）。
  * deviceId は `pdv_` + HMAC(token) の決定論的ID（再登録は同一doc更新で冪等）。
  * token はFCM registration token/FIDベーストークン。症状等のPHIは含めない。
  * status: active=送信対象 / invalid=FCMが未登録・不正を返し無効化済み。

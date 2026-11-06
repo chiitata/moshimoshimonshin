@@ -4,11 +4,10 @@ import { audit, auditResourceHash, auditUidHash } from "../lib/audit.js";
 import { ApiError } from "../lib/errors.js";
 import { requestHash, runIdempotent } from "../lib/idempotency.js";
 import {
-  deletePushDevice,
-  getPushDevice,
   pushDeviceIdForToken,
   upsertPushDeviceInTx,
 } from "../repos/pushDevices.js";
+import type { PushDeviceDoc } from "../domain/firestoreDocs.js";
 import type { DeviceRegisterBody } from "../domain/schemas.js";
 
 /**
@@ -66,18 +65,26 @@ export async function unregisterDevice(
   deps: Deps,
   params: { uid: string; deviceId: string; requestId?: string },
 ): Promise<void> {
-  const doc = await getPushDevice(deps.db, params.deviceId);
-  if (!doc.exists || !doc.data || doc.data.patientUid !== params.uid) {
-    throw ApiError.notFound("デバイスが見つかりません。");
-  }
-  await deletePushDevice(deps.db, params.deviceId);
+  const ref = deps.db.doc(`pushDevices/${params.deviceId}`);
+  // 所有者確認と削除を同一トランザクションで行う。
+  // 読み取り後に別アカウントの再登録で所有者が変わっても、
+  // tx内の再読み取りで本人所有を確認してから削除する。
+  const platform = await deps.db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const data = snap.data() as PushDeviceDoc | undefined;
+    if (!snap.exists || !data || data.patientUid !== params.uid) {
+      throw ApiError.notFound("デバイスが見つかりません。");
+    }
+    await tx.delete(ref);
+    return data.platform;
+  });
   await audit(deps, {
     actorType: "patient",
     actorUidHash: auditUidHash(deps, params.uid),
     action: AUDIT_ACTIONS.PUSH_DEVICE_UNREGISTERED,
     resourceType: "pushDevices",
     resourceIdHash: auditResourceHash(deps, params.deviceId),
-    details: { platform: doc.data.platform },
+    details: { platform },
     ...(params.requestId ? { requestId: params.requestId } : {}),
   });
 }

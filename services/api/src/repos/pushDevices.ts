@@ -5,7 +5,7 @@ import {
   type Transaction,
 } from "firebase-admin/firestore";
 import type { PushDeviceDoc } from "../domain/firestoreDocs.js";
-import { getDoc, queryDocs } from "./helpers.js";
+import { queryDocs } from "./helpers.js";
 import type { FirestoreLike } from "./helpers.js";
 import { hmacParts } from "../lib/hash.js";
 import type { Deps } from "../deps.js";
@@ -20,13 +20,6 @@ export const PUSH_DEVICE_SEND_LIMIT = 20;
  */
 export function pushDeviceIdForToken(deps: Deps, token: string): string {
   return `pdv_${hmacParts(deps.config.hmacSecret, "push-device", token)}`;
-}
-
-export async function getPushDevice(
-  db: FirestoreLike,
-  deviceId: string,
-): Promise<{ exists: boolean; data: PushDeviceDoc | undefined }> {
-  return getDoc<PushDeviceDoc>(db, `pushDevices/${deviceId}`);
 }
 
 /**
@@ -83,23 +76,51 @@ export async function listActivePushDevices(
   ], { limit: PUSH_DEVICE_SEND_LIMIT });
 }
 
-/** FCM がトークン失効を返したデバイスを無効化する。 */
+function timestampMillis(v: unknown): number | undefined {
+  if (
+    v !== null &&
+    typeof v === "object" &&
+    "toMillis" in v &&
+    typeof (v as { toMillis?: unknown }).toMillis === "function"
+  ) {
+    return (v as { toMillis: () => number }).toMillis();
+  }
+  return undefined;
+}
+
+/**
+ * FCM がトークン失効を返したデバイスを無効化する。
+ * `expectedLastSeenAt`（送信試行時点で読んだ値）と現行値が異なる場合、
+ * 送信試行後に再登録が走ったと判断して無効化をスキップする。
+ * 再登録は lastSeenAt を必ず更新するため、これで競合時の
+ * 「再登録直後の active を invalid で上書き」を防ぐ。
+ */
 export async function invalidatePushDevice(
   db: FirestoreLike,
   deviceId: string,
   reason: string,
+  expectedLastSeenAt?: unknown,
 ): Promise<void> {
-  await db.doc(`pushDevices/${deviceId}`).update({
-    status: "invalid",
-    invalidatedReason: reason,
-    updatedAt: FieldValue.serverTimestamp(),
+  await db.runTransaction(async (tx) => {
+    const ref = db.doc(`pushDevices/${deviceId}`);
+    const snap = await tx.get(ref);
+    if (!snap.exists) return;
+    const expected = timestampMillis(expectedLastSeenAt);
+    const current = timestampMillis(
+      (snap.data() as PushDeviceDoc | undefined)?.lastSeenAt,
+    );
+    // 比較不能な場合は変更を検知できないので無効化を進める
+    if (
+      expected !== undefined &&
+      current !== undefined &&
+      current !== expected
+    ) {
+      return;
+    }
+    await tx.update(ref, {
+      status: "invalid",
+      invalidatedReason: reason,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
   });
-}
-
-/** 本人のデバイス解除。存在しない・他人所有は呼び出し側で404にする。 */
-export async function deletePushDevice(
-  db: FirestoreLike,
-  deviceId: string,
-): Promise<void> {
-  await db.doc(`pushDevices/${deviceId}`).delete();
 }
