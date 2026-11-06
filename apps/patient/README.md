@@ -16,6 +16,12 @@ Flutter の Android / iOS / Web 向けデモ雛形です。現在は準備画面
 
 Android Emulator での確認には別途 Android SDK、エミュレータとシステムイメージ、仮想化対応環境が必要です。iOS のエミュレータやビルドには macOS と Xcode が必要です。
 
+症状入力の独立プレビューは `apps/patient` で次を実行し、http://localhost:5052 を開いて確認できます。入力は画面内だけに保持し、保存・送信しません。実際の症状や個人情報ではなく架空の内容を使用してください。
+
+```sh
+nix develop --command flutter run -d web-server --web-hostname=localhost --web-port=5052 -t lib/demo_symptom_preview.dart
+```
+
 ## 検証
 
 `apps/patient` で `flutter pub get`、`flutter analyze`、`flutter test` を実行します。iOS のビルドには macOS と Xcode が別途必要です。Android のビルドにも対応する SDK が必要です。
