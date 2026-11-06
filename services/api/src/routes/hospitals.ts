@@ -5,6 +5,7 @@ import type { Deps } from "../deps.js";
 import { requireFacilityRole } from "../auth/gates.js";
 import { ApiError } from "../lib/errors.js";
 import { audit, auditResourceHash, auditUidHash } from "../lib/audit.js";
+import { AUDIT_ACTIONS } from "../domain/auditEvents.js";
 import {
   acknowledgeDelivery,
   getDeliveryRecord,
@@ -165,7 +166,7 @@ export function registerHospitalRoutes(app: FastifyInstance, deps: Deps): void {
         await audit(deps, {
           actorType: "staff",
           actorUidHash: auditUidHash(deps, uidOf(req)),
-          action: "DELIVERY_VIEWED",
+          action: AUDIT_ACTIONS.DELIVERY_VIEWED,
           resourceType: "delivery",
           resourceIdHash: auditResourceHash(deps, deliveryId),
           facilityId,
@@ -178,7 +179,7 @@ export function registerHospitalRoutes(app: FastifyInstance, deps: Deps): void {
       await audit(deps, {
         actorType: "staff",
         actorUidHash: auditUidHash(deps, uidOf(req)),
-        action: "DELIVERY_VIEWED",
+        action: AUDIT_ACTIONS.DELIVERY_VIEWED,
         resourceType: "delivery",
         resourceIdHash: auditResourceHash(deps, deliveryId),
         facilityId,
@@ -235,7 +236,7 @@ export function registerHospitalRoutes(app: FastifyInstance, deps: Deps): void {
       await audit(deps, {
         actorType: "staff",
         actorUidHash: auditUidHash(deps, uidOf(req)),
-        action: "DELIVERY_ACKNOWLEDGED",
+        action: AUDIT_ACTIONS.DELIVERY_ACKNOWLEDGED,
         resourceType: "delivery",
         resourceIdHash: auditResourceHash(deps, deliveryId),
         facilityId,

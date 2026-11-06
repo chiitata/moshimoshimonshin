@@ -310,7 +310,7 @@ describe("OcrWorker.runJob", () => {
       .get();
     expect(audits.size).toBe(1);
     const ev = audits.docs[0]!.data()!;
-    expect(ev.details?.errorCode).toBe("worker_interrupted");
+    expect((ev.details as { errorCode?: string } | undefined)?.errorCode).toBe("worker_interrupted");
     expect(ev.resourceIdHash).not.toBe(jobId);
   });
 

@@ -5,7 +5,14 @@ import { type ZodTypeProvider } from "fastify-type-provider-zod";
 import type { Deps } from "../deps.js";
 import { requireFacilityRole, requireFreshAuth } from "../auth/gates.js";
 import { ApiError, ErrorCodes } from "../lib/errors.js";
-import { auditInTransaction, auditResourceHash, auditUidHash } from "../lib/audit.js";
+import {
+  auditInTransaction,
+  auditResourceHash,
+  auditUidHash,
+  logAuditEvent,
+} from "../lib/audit.js";
+import { AUDIT_ACTIONS } from "../domain/auditEvents.js";
+import type { AuditEventDoc } from "../domain/firestoreDocs.js";
 import { randomId } from "../lib/hash.js";
 import { queryDocs } from "../repos/helpers.js";
 import { errors } from "./apiDocs.js";
@@ -41,7 +48,10 @@ export function registerStaffRoutes(app: FastifyInstance, deps: Deps): void {
     if (existing.length) throw ApiError.conflict(ErrorCodes.REVISION_CONFLICT, "このメールアドレスへの招待は保留中です。");
     const invitationId = randomId("inv");
     const actorUid = req.requestContext.auth!.uid;
+    const committedAudits: AuditEventDoc[] = [];
     await deps.db.runTransaction(async (tx) => {
+      // tx リトライ時にロールバック済みイベントが残らないよう各試行でリセット
+      committedAudits.length = 0;
       tx.create(deps.db.doc(`facilityInvitations/${invitationId}`), {
         facilityId: req.params.facilityId,
         email,
@@ -50,13 +60,16 @@ export function registerStaffRoutes(app: FastifyInstance, deps: Deps): void {
         invitedByUid: actorUid,
         createdAt: Timestamp.fromDate(deps.clock.now()),
       });
-      auditInTransaction(tx, deps, {
-        actorType: "staff", actorUidHash: auditUidHash(deps, actorUid),
-        action: "staff.invite", resourceType: "facilityInvitation",
-        resourceIdHash: auditResourceHash(deps, invitationId),
-        facilityId: req.params.facilityId, requestId: req.id, decision: "allow",
-      });
+      committedAudits.push(
+        auditInTransaction(tx, deps, {
+          actorType: "staff", actorUidHash: auditUidHash(deps, actorUid),
+          action: AUDIT_ACTIONS.STAFF_INVITED, resourceType: "facilityInvitation",
+          resourceIdHash: auditResourceHash(deps, invitationId),
+          facilityId: req.params.facilityId, requestId: req.id, decision: "allow",
+        }),
+      );
     });
+    for (const e of committedAudits) logAuditEvent(deps, e);
     return reply.code(201).send({ invitationId, status: "pending" as const });
   });
 
@@ -73,7 +86,9 @@ export function registerStaffRoutes(app: FastifyInstance, deps: Deps): void {
     await requireFacilityRole(deps, req, req.params.facilityId, ["facility_admin"]);
     requireFreshAuth(deps, req);
     const actorUid = req.requestContext.auth!.uid;
+    const committedAudits: AuditEventDoc[] = [];
     const result = await deps.db.runTransaction(async (tx) => {
+      committedAudits.length = 0;
       const ref = deps.db.doc(`facilityMemberships/${req.params.membershipId}`);
       const snapshot = await tx.get(ref);
       const member = snapshot.data() as { facilityId?: string; userUid?: string; role?: string; status?: string } | undefined;
@@ -89,14 +104,17 @@ export function registerStaffRoutes(app: FastifyInstance, deps: Deps): void {
         status,
         ...(status === "revoked" ? { revokedAt: Timestamp.fromDate(deps.clock.now()) } : {}),
       });
-      auditInTransaction(tx, deps, {
-        actorType: "staff", actorUidHash: auditUidHash(deps, actorUid),
-        action: "staff.membership.update", resourceType: "facilityMembership",
-        resourceIdHash: auditResourceHash(deps, req.params.membershipId),
-        facilityId: req.params.facilityId, requestId: req.id, decision: "allow",
-      });
+      committedAudits.push(
+        auditInTransaction(tx, deps, {
+          actorType: "staff", actorUidHash: auditUidHash(deps, actorUid),
+          action: AUDIT_ACTIONS.STAFF_MEMBERSHIP_UPDATED, resourceType: "facilityMembership",
+          resourceIdHash: auditResourceHash(deps, req.params.membershipId),
+          facilityId: req.params.facilityId, requestId: req.id, decision: "allow",
+        }),
+      );
       return { membershipId: req.params.membershipId, role: role as z.infer<typeof staffRole>, status: status as "active" | "revoked" };
     });
+    for (const e of committedAudits) logAuditEvent(deps, e);
     return result;
   });
 }
