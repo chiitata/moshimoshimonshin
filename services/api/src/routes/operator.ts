@@ -41,7 +41,9 @@ const disableBody = z.object({
 const jobFailuresQuery = z.object({
   type: z.enum(["ocr", "deletion"]),
   limit: z.coerce.number().int().min(1).max(100).default(20),
-  cursor: z.string().regex(/^[A-Za-z0-9_-]+$/).max(200).optional(),
+  // 不透明カーソルは base64url(28B + docパス)。FirestoreのdocId上限
+  // (1500B)まで発行したカーソルが受理されるよう余裕を持たせる
+  cursor: z.string().regex(/^[A-Za-z0-9_-]+$/).max(2100).optional(),
 });
 
 const jobFailureItemSchema = z.object({

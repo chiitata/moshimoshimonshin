@@ -78,6 +78,7 @@ export async function listFailedOcrJobs(
   deps: Deps,
   opts: { cursor?: string; limit: number },
 ): Promise<JobFailurePage> {
+  if (opts.limit < 1) return { items: [], nextCursor: null };
   let startAfterDoc: DocumentSnapshot | undefined;
   if (opts.cursor) {
     const cur = await resolveCursor(
@@ -123,6 +124,7 @@ export async function listFailedDeletionJobs(
   deps: Deps,
   opts: { cursor?: string; limit: number },
 ): Promise<JobFailurePage> {
+  if (opts.limit < 1) return { items: [], nextCursor: null };
   let startAfterDoc: DocumentSnapshot | undefined;
   if (opts.cursor) {
     const cur = await resolveCursor(
