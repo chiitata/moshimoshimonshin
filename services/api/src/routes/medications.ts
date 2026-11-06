@@ -47,7 +47,7 @@ export function registerMedicationRoutes(
         params: jobIdParam,
         response: {
           200: extractionResponseSchema,
-          ...errors(401, 403, 404),
+          ...errors(401, 403, 404, 412, 429, 500, 503),
         },
         tags: ["medications"],
         summary: "OCR抽出候補の照会（unconfirmed のまま返却）",
@@ -67,7 +67,7 @@ export function registerMedicationRoutes(
         body: medicationCreateSchema,
         response: {
           201: medicationResponseSchema,
-          ...errors(400, 401, 403, 404, 409, 412, 429),
+          ...errors(400, 401, 403, 404, 409, 412, 429, 500, 503),
         },
         tags: ["medications"],
         summary: "本人確認済み薬剤登録（Idempotency-Key 必須）",
@@ -94,7 +94,7 @@ export function registerMedicationRoutes(
       schema: {
         response: {
           200: medicationListResponseSchema,
-          ...errors(401, 403),
+          ...errors(401, 403, 412, 429, 500, 503),
         },
         tags: ["medications"],
         summary: "薬剤一覧（現在/過去/不明を区別、FR-M05）",
@@ -114,7 +114,7 @@ export function registerMedicationRoutes(
         body: medicationPatchSchema,
         response: {
           200: medicationResponseSchema,
-          ...errors(400, 401, 403, 404),
+          ...errors(400, 401, 403, 404, 412, 429, 500, 503),
         },
         tags: ["medications"],
         summary: "薬剤編集",
@@ -138,7 +138,7 @@ export function registerMedicationRoutes(
         params: medicationIdParam,
         response: {
           204: z.null(),
-          ...errors(401, 403, 404),
+          ...errors(401, 403, 404, 412, 429, 500, 503),
         },
         tags: ["medications"],
         summary: "薬剤削除",
