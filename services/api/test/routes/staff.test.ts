@@ -93,4 +93,48 @@ describe("staff management", () => {
     expect((revoked[0]!["details"] as { status?: string }).status).toBe("revoked");
     await app.close();
   });
+
+  it("変更のない PATCH は監査を発行しない", async () => {
+    const { app, deps } = await setup();
+    const base = `/v1/hospitals/${facilityId}/memberships`;
+
+    // revoked へ遷移（MEMBERSHIP_REVOKED が1件）
+    await app.inject({
+      method: "PATCH",
+      url: `${base}/staff`,
+      headers: authHeader("admin"),
+      payload: { status: "revoked" },
+    });
+    // 同一 status の繰り返し PATCH は遷移なし
+    const res = await app.inject({
+      method: "PATCH",
+      url: `${base}/staff`,
+      headers: authHeader("admin"),
+      payload: { status: "revoked" },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const audits = await deps.db.collection("auditEvents").get();
+    const events = audits.docs
+      .map((d) => d.data())
+      .filter(
+        (e) =>
+          e["action"] === "STAFF_MEMBERSHIP_UPDATED" ||
+          e["action"] === "MEMBERSHIP_REVOKED",
+      );
+    expect(events).toHaveLength(1);
+    expect(events[0]!["action"]).toBe("MEMBERSHIP_REVOKED");
+    // revokedAt は2回目で上書きされない（失効遷移時のみ打刻）
+    const member = await deps.db.doc("facilityMemberships/staff").get();
+    const firstRevokedAt = member.data()!["revokedAt"];
+    await app.inject({
+      method: "PATCH",
+      url: `${base}/staff`,
+      headers: authHeader("admin"),
+      payload: { role: "facility_clinician" },
+    });
+    const after = await deps.db.doc("facilityMemberships/staff").get();
+    expect(after.data()!["revokedAt"]).toEqual(firstRevokedAt);
+    await app.close();
+  });
 });

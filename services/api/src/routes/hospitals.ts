@@ -242,12 +242,12 @@ export function registerHospitalRoutes(app: FastifyInstance, deps: Deps): void {
       }
 
       const now = deps.clock.now();
-      const { alreadyAcknowledged, acknowledgedAt } = await acknowledgeDelivery(
-        deps.db,
-        deliveryId,
-        uidOf(req),
-        now,
-      );
+      const { found, alreadyAcknowledged, acknowledgedAt } =
+        await acknowledgeDelivery(deps.db, deliveryId, uidOf(req), now);
+      // 直前チェック後にドキュメントが消えた場合は監査せず404（遷移なし＝監査なし）
+      if (!found) {
+        throw ApiError.notFound();
+      }
 
       // 冪等な再受領では状態遷移が起きていないため監査は発行しない
       if (!alreadyAcknowledged) {

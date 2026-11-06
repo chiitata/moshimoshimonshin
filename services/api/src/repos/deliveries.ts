@@ -120,13 +120,19 @@ export async function acknowledgeDelivery(
   deliveryId: string,
   staffUid: string,
   now: Date,
-): Promise<{ alreadyAcknowledged: boolean; acknowledgedAt: unknown }> {
+): Promise<{ found: boolean; alreadyAcknowledged: boolean; acknowledgedAt: unknown }> {
+  let found = false;
   let alreadyAcknowledged = false;
   let acknowledgedAt: unknown = null;
   await db.runTransaction(async (tx) => {
+    // tx リトライ時に前試行の結果が残らないよう各試行でリセット
+    found = false;
+    alreadyAcknowledged = false;
+    acknowledgedAt = null;
     const ref = deliveriesCollection(db).doc(deliveryId);
     const snap = await tx.get(ref);
     if (!snap.exists) return;
+    found = true;
     const data = snap.data() as DeliveryDoc;
     if (data.status === "acknowledged") {
       alreadyAcknowledged = true;
@@ -141,5 +147,5 @@ export async function acknowledgeDelivery(
       updatedAt: FieldValue.serverTimestamp(),
     });
   });
-  return { alreadyAcknowledged, acknowledgedAt };
+  return { found, alreadyAcknowledged, acknowledgedAt };
 }
