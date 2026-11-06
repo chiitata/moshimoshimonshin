@@ -168,11 +168,11 @@ export async function listJobFailures(
 ): Promise<JobFailurePage> {
   const page =
     params.type === "ocr"
-      ? await listFailedOcrJobs(deps.db, {
+      ? await listFailedOcrJobs(deps, {
           ...(params.cursor ? { cursor: params.cursor } : {}),
           limit: params.limit,
         })
-      : await listFailedDeletionJobs(deps.db, {
+      : await listFailedDeletionJobs(deps, {
           ...(params.cursor ? { cursor: params.cursor } : {}),
           limit: params.limit,
         });

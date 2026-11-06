@@ -1,12 +1,18 @@
 import type { DocumentSnapshot } from "firebase-admin/firestore";
+import type { Deps } from "../deps.js";
 import type { DeletionJobDoc, OcrJobDoc } from "../domain/firestoreDocs.js";
+import { hmacSha256Hex } from "../lib/hash.js";
+import {
+  decodeOpaqueCursor,
+  encodeOpaqueCursor,
+} from "../lib/opaqueCursor.js";
 import { queryDocs } from "./helpers.js";
-import type { FirestoreLike } from "./helpers.js";
 
 /**
  * 失敗ジョブ一覧（API-038, FR-O04）。
  * patientUid / subjectUid / uploadId などの個人紐付け識別子は
  * 返さない。一覧は jobId・失敗分類・時刻のみ。
+ * nextCursor はdocパスを暗号化した不透明トークンで、内部IDを漏らさない。
  */
 export interface JobFailureItem {
   type: "ocr" | "deletion";
@@ -34,13 +40,31 @@ const toIsoOrNull = (v: unknown): string | null => {
   return null;
 };
 
-/** スナップショットカーソルの解決。対象コレクション・失敗状態以外は空ページ。 */
+const OCR_PSEUDONYM_RE = /^oj_[0-9a-f]{64}$/;
+
+/**
+ * OCR jobId の表示値。現行の `oj_` 擬名IDはそのまま返す。
+ * 旧形式（doc ID = uploadId）や外来IDは uploadId 露出を防ぐため
+ * 同じ HMAC スキームで再擬名化する（FR-O04）。
+ */
+function displayOcrJobId(deps: Deps, docId: string): string {
+  if (OCR_PSEUDONYM_RE.test(docId)) return docId;
+  return `oj_${hmacSha256Hex(deps.config.hmacSecret, `ocr-job:${docId}`)}`;
+}
+
+/**
+ * 不透明カーソルの解決。復号失敗・対象外コレクション・
+ * 失敗状態でない・ソートキー欠落のいずれも空ページ。
+ */
 async function resolveCursor(
-  db: FirestoreLike,
-  path: string,
+  deps: Deps,
+  token: string,
+  collection: string,
   requireFailed: (data: Record<string, unknown>) => boolean,
 ): Promise<DocumentSnapshot | null> {
-  const snap = await db.doc(path).get();
+  const path = decodeOpaqueCursor(deps.config.hmacSecret, token);
+  if (path === null || !path.startsWith(`${collection}/`)) return null;
+  const snap = await deps.db.doc(path).get();
   const data = snap.data() as Record<string, unknown> | undefined;
   if (!snap.exists || !data || !requireFailed(data)) return null;
   return snap;
@@ -48,21 +72,22 @@ async function resolveCursor(
 
 /** OCR失敗ジョブ（updatedAt 降順）。 */
 export async function listFailedOcrJobs(
-  db: FirestoreLike,
+  deps: Deps,
   opts: { cursor?: string; limit: number },
 ): Promise<JobFailurePage> {
   let startAfterDoc: DocumentSnapshot | undefined;
   if (opts.cursor) {
     const cur = await resolveCursor(
-      db,
-      `ocrJobs/${opts.cursor}`,
+      deps,
+      opts.cursor,
+      "ocrJobs",
       (d) => d["status"] === "failed" && d["updatedAt"] != null,
     );
     if (cur === null) return { items: [], nextCursor: null };
     startAfterDoc = cur;
   }
   const rows = await queryDocs<OcrJobDoc>(
-    db,
+    deps.db,
     "ocrJobs",
     [{ field: "status", op: "==", value: "failed" }],
     {
@@ -73,34 +98,41 @@ export async function listFailedOcrJobs(
   );
   const items = rows.slice(0, opts.limit).map((r) => ({
     type: "ocr" as const,
-    jobId: r.id,
+    jobId: displayOcrJobId(deps, r.id),
     failureCode: r.data.errorCode,
     attempts: r.data.attempt,
     failedAt: toIsoOrNull(r.data.updatedAt),
   }));
   return {
     items,
-    nextCursor: rows.length > opts.limit ? items[items.length - 1]!.jobId : null,
+    nextCursor:
+      rows.length > opts.limit
+        ? encodeOpaqueCursor(
+            deps.config.hmacSecret,
+            `ocrJobs/${rows[opts.limit - 1]!.id}`,
+          )
+        : null,
   };
 }
 
-/** 削除失敗ジョブ（requestedAt 降順）。 */
+/** 削除失敗ジョブ（requestedAt 降順）。jobId はランダムauto-IDで非識別。 */
 export async function listFailedDeletionJobs(
-  db: FirestoreLike,
+  deps: Deps,
   opts: { cursor?: string; limit: number },
 ): Promise<JobFailurePage> {
   let startAfterDoc: DocumentSnapshot | undefined;
   if (opts.cursor) {
     const cur = await resolveCursor(
-      db,
-      `deletionJobs/${opts.cursor}`,
+      deps,
+      opts.cursor,
+      "deletionJobs",
       (d) => d["status"] === "failed" && d["requestedAt"] != null,
     );
     if (cur === null) return { items: [], nextCursor: null };
     startAfterDoc = cur;
   }
   const rows = await queryDocs<DeletionJobDoc>(
-    db,
+    deps.db,
     "deletionJobs",
     [{ field: "status", op: "==", value: "failed" }],
     {
@@ -118,6 +150,12 @@ export async function listFailedDeletionJobs(
   }));
   return {
     items,
-    nextCursor: rows.length > opts.limit ? items[items.length - 1]!.jobId : null,
+    nextCursor:
+      rows.length > opts.limit
+        ? encodeOpaqueCursor(
+            deps.config.hmacSecret,
+            `deletionJobs/${rows[opts.limit - 1]!.id}`,
+          )
+        : null,
   };
 }

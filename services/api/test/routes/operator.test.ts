@@ -3,6 +3,7 @@ import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { makeTestDeps, type TestDeps } from "../helpers/deps.js";
 import { authHeader, buildTestApp } from "../helpers/app.js";
 import type { AuditEventDoc, FacilityDoc } from "../../src/domain/firestoreDocs.js";
+import { encodeOpaqueCursor } from "../../src/lib/opaqueCursor.js";
 
 const OP = "op-admin-1";
 const FAC = "fac-op-1";
@@ -317,10 +318,13 @@ describe("POST /v1/operator/facilities/:facilityId/disable", () => {
 });
 
 describe("GET /v1/operator/job-failures", () => {
+  /** 現行スキームの擬名ジョブID（oj_+64hex）。 */
+  const oj = (c: string) => `oj_${c.padEnd(64, "0")}`;
+
   async function seedFailedJobs(deps: TestDeps) {
-    // OCR: failed ×3, succeeded ×1
+    // OCR: failed ×4（うち1件は旧形式 docId=uploadId）, succeeded ×1
     for (let i = 1; i <= 3; i++) {
-      await deps.db.doc(`ocrJobs/job-ocr-${i}`).set({
+      await deps.db.doc(`ocrJobs/${oj(String(i).padStart(4, "0"))}`).set({
         uploadId: `upload-${i}`,
         patientUid: "u-patient-secret",
         status: "failed",
@@ -333,7 +337,20 @@ describe("GET /v1/operator/job-failures", () => {
         updatedAt: Timestamp.fromMillis(1000 + i),
       });
     }
-    await deps.db.doc("ocrJobs/job-ocr-ok").set({
+    // 旧形式: doc ID が uploadId そのもの（ハッシュ化以前のジョブ）
+    await deps.db.doc("ocrJobs/upload-legacy-1").set({
+      uploadId: "upload-legacy-1",
+      patientUid: "u-patient-secret",
+      status: "failed",
+      engine: "dummy",
+      attempt: 2,
+      errorCode: "engine_unavailable",
+      candidates: [],
+      dispatchState: "enqueued",
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: Timestamp.fromMillis(500),
+    });
+    await deps.db.doc(`ocrJobs/${oj("f")}`).set({
       uploadId: "upload-ok",
       patientUid: "u-patient-secret",
       status: "succeeded",
@@ -368,18 +385,20 @@ describe("GET /v1/operator/job-failures", () => {
     });
     expect(res.statusCode).toBe(200);
     const items = res.json().items as Array<Record<string, unknown>>;
-    expect(items).toHaveLength(3);
+    expect(items).toHaveLength(4);
     for (const it of items) {
       expect(it["type"]).toBe("ocr");
-      expect(it["failureCode"]).toBe("image_unclear");
-      // FR-O04: 患者UID/件名UID/アップロードIDを含めない
+      // FR-O04: 患者UID/件名UID/アップロードIDを含めない。
+      // 旧形式doc(=uploadIdがdoc ID)の jobId も擬名化されて "upload-" を漏らさない
       const json = JSON.stringify(it);
       expect(json).not.toContain("u-patient-secret");
       expect(json).not.toContain("u-subject-secret");
       expect(json).not.toContain("upload-");
+      expect(it["jobId"]).toMatch(/^oj_[0-9a-f]{64}$/);
     }
-    // updatedAt 降順（job-ocr-3 が先頭）
-    expect(items[0]!["jobId"]).toBe("job-ocr-3");
+    // updatedAt 降順（oj("0003") が先頭、レガシー(500ms)が末尾）
+    expect(items[0]!["jobId"]).toBe(oj("0003"));
+    expect(items[3]!["failureCode"]).toBe("engine_unavailable");
 
     const events = await auditActions(deps, "JOB_FAILURES_LISTED");
     expect(events).toHaveLength(1);
@@ -406,7 +425,7 @@ describe("GET /v1/operator/job-failures", () => {
     });
     expect(JSON.stringify(items[0])).not.toContain("u-subject-secret");
 
-    // ページング
+    // ページング（nextCursor は内部IDを含まない不透明トークン）
     const p1 = await app.inject({
       method: "GET",
       url: "/v1/operator/job-failures?type=ocr&limit=2",
@@ -414,13 +433,14 @@ describe("GET /v1/operator/job-failures", () => {
     });
     const j1 = p1.json();
     expect(j1.items).toHaveLength(2);
-    expect(j1.nextCursor).toBe("job-ocr-2");
+    expect(typeof j1.nextCursor).toBe("string");
+    expect(j1.nextCursor).not.toContain(oj("0002"));
     const p2 = await app.inject({
       method: "GET",
       url: `/v1/operator/job-failures?type=ocr&limit=2&cursor=${j1.nextCursor}`,
       headers: authHeader(OP),
     });
-    expect(p2.json().items).toHaveLength(1);
+    expect(p2.json().items).toHaveLength(2);
     expect(p2.json().nextCursor).toBeNull();
 
     // 権限とバリデーション
@@ -459,13 +479,33 @@ describe("GET /v1/operator/job-failures", () => {
         })
       ).statusCode,
     ).toBe(400);
-    // 存在しない・対象外カーソルは空ページ
+    // 復号不能カーソル・非失敗doc・他コレクションは空ページ
+    const garbage = await app.inject({
+      method: "GET",
+      url: "/v1/operator/job-failures?type=ocr&cursor=not-a-real-cursor",
+      headers: authHeader(OP),
+    });
+    expect(garbage.json().items).toEqual([]);
+    const notFailed = encodeOpaqueCursor(
+      deps.config.hmacSecret,
+      `ocrJobs/${oj("f")}`,
+    );
     const empty = await app.inject({
       method: "GET",
-      url: "/v1/operator/job-failures?type=ocr&cursor=job-ocr-ok",
+      url: `/v1/operator/job-failures?type=ocr&cursor=${notFailed}`,
       headers: authHeader(OP),
     });
     expect(empty.json().items).toEqual([]);
+    const foreign = encodeOpaqueCursor(
+      deps.config.hmacSecret,
+      "deletionJobs/job-del-1",
+    );
+    const cross = await app.inject({
+      method: "GET",
+      url: `/v1/operator/job-failures?type=ocr&cursor=${foreign}`,
+      headers: authHeader(OP),
+    });
+    expect(cross.json().items).toEqual([]);
     await app.close();
   });
 });
