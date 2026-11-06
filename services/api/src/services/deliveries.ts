@@ -2,7 +2,7 @@ import { Timestamp, type DocumentData } from "firebase-admin/firestore";
 import type { Deps } from "../deps.js";
 import type { DeliveryCreateBody } from "../domain/schemas.js";
 import type { DeliveryDoc } from "../domain/firestoreDocs.js";
-import { ApiError, ErrorCodes } from "../lib/errors.js";
+import { ApiError } from "../lib/errors.js";
 import {
   idempotencyKeyHash,
   requestHash,
@@ -10,11 +10,8 @@ import {
 } from "../lib/idempotency.js";
 import { randomId, sha256Hex, canonicalJson } from "../lib/hash.js";
 import { audit, auditUidHash, auditInTransaction } from "../lib/audit.js";
-import { deliveryRef, getDelivery, getFacility } from "../repos/deliveries.js";
-import { getQuestionnaire } from "../repos/questionnaires.js";
-import { getDoc } from "../repos/helpers.js";
+import { deliveryRef, getDelivery } from "../repos/deliveries.js";
 import type { QuestionnaireRevisionDoc } from "../domain/firestoreDocs.js";
-import { idempotencyKeyRef } from "../repos/operations.js";
 
 const IDEMPOTENCY_NS = "deliver";
 
