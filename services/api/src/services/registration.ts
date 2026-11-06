@@ -24,6 +24,7 @@ import { hmacParts } from "../lib/hash.js";
 import { getLegalDocuments } from "../repos/legalConfig.js";
 import { registrationOperationRef } from "../repos/operations.js";
 import { audit, auditUidHash } from "../lib/audit.js";
+import { AUDIT_ACTIONS } from "../domain/auditEvents.js";
 import type { Transaction } from "../repos/helpers.js";
 
 export interface RegisterResult {
@@ -99,11 +100,11 @@ export async function registerEmail(
     if (operation.requestHash !== reqHash) {
       await audit(deps, {
         actorType: "service",
-        action: "REGISTRATION_ATTEMPT",
+        action: AUDIT_ACTIONS.REGISTRATION_ATTEMPT,
         outcome: "conflict",
         requestId: params.requestId,
         resourceType: "registrationOperation",
-        resourceIdHash: operationHash.slice(0, 32),
+        resourceIdHash: operationHash,
       });
       throw ApiError.conflict(
         ErrorCodes.REGISTRATION_CONFLICT,
@@ -150,7 +151,11 @@ export async function registerEmail(
       now,
       // 期限切れ上書き時は既存UIDを引き継ぐ。新UIDではAuth側の
       // email-already-existsに阻まれて登録を復旧できなくなる。
-      { overwrite: operation !== undefined, uid: operation?.uid },
+      {
+        overwrite: operation !== undefined,
+        uid: operation?.uid,
+        requestId: params.requestId,
+      },
     );
   }
 
@@ -242,11 +247,11 @@ export async function registerEmail(
     }).catch(() => undefined);
     await audit(deps, {
       actorType: "service",
-      action: "REGISTRATION_ATTEMPT",
+      action: AUDIT_ACTIONS.REGISTRATION_ATTEMPT,
       outcome: "failed",
       requestId: params.requestId,
       resourceType: "registrationOperation",
-      resourceIdHash: operationHash.slice(0, 32),
+      resourceIdHash: operationHash,
       details: { errorClass: errorClass(err) },
     });
     throw new ApiError(
@@ -260,11 +265,11 @@ export async function registerEmail(
   await audit(deps, {
     actorType: "patient",
     actorUidHash: auditUidHash(deps, operation.uid),
-    action: "REGISTRATION_ATTEMPT",
+    action: AUDIT_ACTIONS.REGISTRATION_ATTEMPT,
     outcome: "created",
     requestId: params.requestId,
     resourceType: "registrationOperation",
-    resourceIdHash: operationHash.slice(0, 32),
+    resourceIdHash: operationHash,
   });
 
   return {
@@ -355,22 +360,22 @@ async function reconcileEmailConflict(
       });
       await audit(deps, {
         actorType: "service",
-        action: "REGISTRATION_ATTEMPT",
+        action: AUDIT_ACTIONS.REGISTRATION_ATTEMPT,
         outcome: "recovered",
         requestId: params.requestId,
         resourceType: "registrationOperation",
-        resourceIdHash: operationHash.slice(0, 32),
+        resourceIdHash: operationHash,
       });
       return;
     }
   }
   await audit(deps, {
     actorType: "service",
-    action: "REGISTRATION_ATTEMPT",
+    action: AUDIT_ACTIONS.REGISTRATION_ATTEMPT,
     outcome: "conflict",
     requestId: params.requestId,
     resourceType: "registrationOperation",
-    resourceIdHash: operationHash.slice(0, 32),
+    resourceIdHash: operationHash,
   });
   throw ApiError.conflict(
     ErrorCodes.REGISTRATION_CONFLICT,
@@ -384,7 +389,11 @@ async function reserveOperation(
   reqHash: string,
   legalVersionSet: RegistrationOperationDoc["legalVersionSet"],
   now: Date,
-  opts: { overwrite?: boolean; uid?: string | undefined } = {},
+  opts: {
+    overwrite?: boolean;
+    uid?: string | undefined;
+    requestId?: string;
+  } = {},
 ): Promise<RegistrationOperationDoc> {
   // 期限切れ上書き時は既存UIDを再利用して孤児Authとの齟齬を防ぐ
   const uid = opts.uid ?? deps.db.collection("registrationOperations").doc().id;
@@ -407,13 +416,27 @@ async function reserveOperation(
     } else {
       await ref.create(doc as unknown as DocumentData);
     }
-  } catch {
+  } catch (writeErr) {
     // 同時予約の競合: 既存台帳を読み直して処理を再開する。
+    // 既存docが無い場合は一過性エラー等の書込失敗なので原因をそのまま投げる
+    // （競合でもないのに conflict 監査を残さない）
     const existing = await ref.get();
     if (existing.exists) {
       const data = existing.data() as RegistrationOperationDoc;
       if (data.requestHash === reqHash) return data;
+    } else {
+      throw writeErr;
     }
+    await audit(deps, {
+      actorType: "service",
+      action: AUDIT_ACTIONS.REGISTRATION_ATTEMPT,
+      outcome: "conflict",
+      ...(opts.requestId !== undefined
+        ? { requestId: opts.requestId }
+        : {}),
+      resourceType: "registrationOperation",
+      resourceIdHash: operationHash,
+    });
     throw ApiError.conflict(
       ErrorCodes.REGISTRATION_CONFLICT,
       "同じ登録キーで異なる内容が送信されました。",

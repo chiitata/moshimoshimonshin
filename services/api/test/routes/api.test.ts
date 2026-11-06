@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { DEV_LEGAL_DOCUMENTS } from "../../src/domain/legalDocuments.js";
 import { makeTestDeps, type TestDeps } from "../helpers/deps.js";
 import {
   authHeader,
@@ -636,6 +637,29 @@ describe("認証ガード", () => {
     await app.close();
   });
 
+  it("不正トークンは AUTH_FAIL 監査を記録する（UID不明・決定=deny）", async () => {
+    const { deps, app } = await setup();
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/me",
+      headers: { authorization: "Bearer garbage" },
+    });
+    expect(res.statusCode).toBe(401);
+    const audits = await deps.memDb
+      .collection("auditEvents")
+      .where("action", "==", "AUTH_FAIL")
+      .get();
+    expect(audits.size).toBe(1);
+    const ev = audits.docs[0]!.data()!;
+    expect(ev.actorType).toBe("patient");
+    // トークンが信用できないため actorUidHash は付けない
+    expect(ev.actorUidHash).toBeUndefined();
+    expect(ev.decision).toBe("deny");
+    expect(ev.requestId).toBeTruthy();
+    expect(JSON.stringify(ev)).not.toContain("garbage");
+    await app.close();
+  });
+
   it("失効ユーザーは 401", async () => {
     const { deps, app } = await setup();
     deps.fakeAuth.revoked.add(UID);
@@ -709,6 +733,76 @@ describe("GET /v1/me", () => {
     expect(body.accountStatus).toBe("pending_deletion");
     expect(body.requiredConsents.current).toBe(false);
     expect(body.deletionRequest.status).toBe("pending_deletion");
+    await app.close();
+  });
+});
+
+describe("GET /v1/me/profile", () => {
+  const medicalHistory = [{
+    conditionText: "合成の病歴",
+    selfReported: true,
+    updatedAt: "2026-11-01T00:00:00.000Z",
+  }];
+
+  it("初回同意前は保存済みプロフィールを返さない", async () => {
+    const { deps, app } = await setup();
+    await seedAccount(deps, UID, {
+      accountStatus: "onboarding_pending",
+      onboardingState: "legal_pending",
+    });
+    await deps.db.doc(`patientProfiles/${UID}`).set({
+      patientUid: UID, profileComplete: false, medicalHistory,
+    });
+    const res = await app.inject({
+      method: "GET", url: "/v1/me/profile", headers: authHeader(UID),
+    });
+    expect(res.statusCode).toBe(412);
+    expect(res.json().error.code).toBe("PRECONDITION_FAILED");
+    expect(res.body).not.toContain("合成の病歴");
+    await app.close();
+  });
+
+  it("旧版同意では保存済みプロフィールを返さない", async () => {
+    const { deps, app } = await setup();
+    await seedAccount(deps, UID);
+    await seedCurrentConsents(deps, UID);
+    await deps.db.doc("appConfigs/publicLegalVersion").set({
+      ...DEV_LEGAL_DOCUMENTS,
+      documents: {
+        ...DEV_LEGAL_DOCUMENTS.documents,
+        health_data_collection: {
+          ...DEV_LEGAL_DOCUMENTS.documents.health_data_collection!,
+          version: "2026-12-01",
+        },
+      },
+    });
+    await deps.db.doc(`patientProfiles/${UID}`).set({
+      patientUid: UID, profileComplete: true, medicalHistory,
+    });
+    const res = await app.inject({
+      method: "GET", url: "/v1/me/profile", headers: authHeader(UID),
+    });
+    expect(res.statusCode).toBe(412);
+    expect(res.json().error.code).toBe("PRECONDITION_FAILED");
+    expect(res.body).not.toContain("合成の病歴");
+    await app.close();
+  });
+
+  it("現行同意済みならプロフィールを返す", async () => {
+    const { deps, app } = await setup();
+    await seedAccount(deps, UID, {
+      accountStatus: "onboarding_pending",
+      onboardingState: "profile_pending",
+    });
+    await seedCurrentConsents(deps, UID);
+    await deps.db.doc(`patientProfiles/${UID}`).set({
+      patientUid: UID, profileComplete: false, medicalHistory,
+    });
+    const res = await app.inject({
+      method: "GET", url: "/v1/me/profile", headers: authHeader(UID),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().profile.medicalHistory).toEqual(medicalHistory);
     await app.close();
   });
 });

@@ -13,6 +13,7 @@ import {
   FakeLlmAdapter,
   FakeOcrEngine,
   FakeOcrTaskQueue,
+  FakePlacesGateway,
   FakeStorageGateway,
 } from "./fakes.js";
 
@@ -28,6 +29,7 @@ export interface TestDeps extends Deps {
   fakeOcrEngine: FakeOcrEngine;
   fakeOcrQueue: FakeOcrTaskQueue;
   fakeLlm: FakeLlmAdapter;
+  fakePlaces: FakePlacesGateway;
 }
 
 export function makeTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -66,6 +68,8 @@ export function makeTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     vertexAiTimeoutMs: 10_000,
     healthzProbeTimeoutMs: 2_000,
     healthzProbeCacheMs: 5_000,
+    googlePlacesApiKey: undefined,
+    placesMaxResults: 10,
     ...overrides,
   });
 }
@@ -83,6 +87,7 @@ export function makeTestDeps(
   const fakeOcrEngine = new FakeOcrEngine();
   const fakeOcrQueue = new FakeOcrTaskQueue();
   const fakeLlm = new FakeLlmAdapter();
+  const fakePlaces = new FakePlacesGateway();
   const logger = pino({ level: "silent" });
 
   const deps: TestDeps = {
@@ -97,6 +102,7 @@ export function makeTestDeps(
     ocrEngine: fakeOcrEngine,
     ocrQueue: fakeOcrQueue,
     llmAdapter: fakeLlm,
+    placesGateway: fakePlaces,
     rateLimiter: new RateLimiter(clock),
     clock,
     logger,
@@ -107,6 +113,7 @@ export function makeTestDeps(
     fakeOcrEngine,
     fakeOcrQueue,
     fakeLlm,
+    fakePlaces,
   };
   deps.uploadCompletion = {
     onUploadCompleted: async (p) => {
