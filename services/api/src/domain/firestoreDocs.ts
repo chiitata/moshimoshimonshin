@@ -371,6 +371,7 @@ export interface DeliveryDoc {
   deliveredAt?: unknown;
   acknowledgedAt?: unknown;
   receivedByStaffUid?: string;
+  updatedAt?: unknown;
 }
 
 export interface AuditEventDoc {

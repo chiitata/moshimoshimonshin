@@ -120,14 +120,22 @@ export async function acknowledgeDelivery(
   deliveryId: string,
   staffUid: string,
   now: Date,
-): Promise<{ found: boolean; alreadyAcknowledged: boolean; acknowledgedAt: unknown }> {
+): Promise<{
+  found: boolean;
+  alreadyAcknowledged: boolean;
+  /** failed/revoked の終端状態では受領確認できない。 */
+  terminal: boolean;
+  acknowledgedAt: unknown;
+}> {
   let found = false;
   let alreadyAcknowledged = false;
+  let terminal = false;
   let acknowledgedAt: unknown = null;
   await db.runTransaction(async (tx) => {
     // tx リトライ時に前試行の結果が残らないよう各試行でリセット
     found = false;
     alreadyAcknowledged = false;
+    terminal = false;
     acknowledgedAt = null;
     const ref = deliveriesCollection(db).doc(deliveryId);
     const snap = await tx.get(ref);
@@ -139,6 +147,11 @@ export async function acknowledgeDelivery(
       acknowledgedAt = data.acknowledgedAt ?? null;
       return;
     }
+    if (data.status === "failed" || data.status === "revoked") {
+      // 終端状態への受領確認は状態機械違反（02 §9）
+      terminal = true;
+      return;
+    }
     acknowledgedAt = Timestamp.fromDate(now);
     tx.update(ref, {
       status: "acknowledged",
@@ -147,5 +160,5 @@ export async function acknowledgeDelivery(
       updatedAt: FieldValue.serverTimestamp(),
     });
   });
-  return { found, alreadyAcknowledged, acknowledgedAt };
+  return { found, alreadyAcknowledged, terminal, acknowledgedAt };
 }

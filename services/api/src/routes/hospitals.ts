@@ -3,7 +3,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
 import { requireFacilityRole } from "../auth/gates.js";
-import { ApiError } from "../lib/errors.js";
+import { ApiError, ErrorCodes } from "../lib/errors.js";
 import { audit, auditResourceHash, auditUidHash } from "../lib/audit.js";
 import { AUDIT_ACTIONS } from "../domain/auditEvents.js";
 import {
@@ -66,7 +66,7 @@ const deliveryDetailResponseSchema = z.object({
 const acknowledgeResponseSchema = z.object({
   deliveryId: z.string(),
   status: z.literal("acknowledged"),
-  acknowledgedAt: z.string(),
+  acknowledgedAt: z.string().nullable(),
 });
 
 function toIso(ts: unknown): string | null {
@@ -214,7 +214,7 @@ export function registerHospitalRoutes(app: FastifyInstance, deps: Deps): void {
         params: deliveryParams,
         response: {
           200: acknowledgeResponseSchema,
-          ...errors(401, 403, 404),
+          ...errors(401, 403, 404, 409),
         },
         tags: ["hospitals"],
         summary: "受領確認（閲覧済み ≠ 診療予約、FR-H10）",
@@ -242,11 +242,18 @@ export function registerHospitalRoutes(app: FastifyInstance, deps: Deps): void {
       }
 
       const now = deps.clock.now();
-      const { found, alreadyAcknowledged, acknowledgedAt } =
+      const { found, alreadyAcknowledged, terminal, acknowledgedAt } =
         await acknowledgeDelivery(deps.db, deliveryId, uidOf(req), now);
       // 直前チェック後にドキュメントが消えた場合は監査せず404（遷移なし＝監査なし）
       if (!found) {
         throw ApiError.notFound();
+      }
+      // failed/revoked の終端状態への受領確認は状態機械違反
+      if (terminal) {
+        throw ApiError.conflict(
+          ErrorCodes.REVISION_CONFLICT,
+          "この配送物は受領確認できない状態です。",
+        );
       }
 
       // 冪等な再受領では状態遷移が起きていないため監査は発行しない
@@ -266,8 +273,7 @@ export function registerHospitalRoutes(app: FastifyInstance, deps: Deps): void {
       return {
         deliveryId,
         status: "acknowledged" as const,
-        acknowledgedAt:
-          toIso(acknowledgedAt) ?? now.toISOString(),
+        acknowledgedAt: toIso(acknowledgedAt),
       };
     },
   );

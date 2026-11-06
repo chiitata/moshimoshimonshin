@@ -111,7 +111,10 @@ export function registerStaffRoutes(app: FastifyInstance, deps: Deps): void {
       }
       const role = req.body.role ?? member.role;
       const status = req.body.status ?? member.status;
-      if (!staffRole.safeParse(role).success || (status !== "active" && status !== "revoked")) throw ApiError.forbidden();
+      if (!staffRole.safeParse(role).success || (status !== "active" && status !== "revoked")) {
+        // 保存済みデータが不正（権限不足ではなくデータ不整合）
+        throw ApiError.conflict(ErrorCodes.REVISION_CONFLICT, "メンバーシップの状態が不正です。");
+      }
       const isRevokeTransition = status === "revoked" && member.status !== "revoked";
       // 変更がない PATCH は更新も監査も発行しない（遷移なし＝監査なし）
       if (role !== member.role || status !== member.status) {

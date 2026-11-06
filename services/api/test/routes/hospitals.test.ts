@@ -314,6 +314,28 @@ describe("hospital receive routes (#18, API-031〜033)", () => {
       expect(events).toHaveLength(0);
     });
 
+    it("終端状態（revoked/failed）への受領確認は409で監査も発行しない", async () => {
+      const { deps, app } = await setup();
+      await seedMembership(deps, STAFF_A, FACILITY_A);
+      await seedDelivery(deps, "d-ack-rev", FACILITY_A, { status: "revoked" });
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/v1/hospitals/${FACILITY_A}/deliveries/d-ack-rev/acknowledge`,
+        headers: authHeader(STAFF_A),
+      });
+      expect(res.statusCode).toBe(409);
+
+      // 終端状態が acknowledged に書き換わっていないこと
+      const snap = await deps.db.doc("deliveries/d-ack-rev").get();
+      expect(snap.data()!["status"]).toBe("revoked");
+      const audits = await deps.db.collection("auditEvents").get();
+      const events = audits.docs
+        .map((d) => d.data())
+        .filter((e) => e["action"] === "DELIVERY_ACKNOWLEDGED");
+      expect(events).toHaveLength(0);
+    });
+
     it("他院deliveryの受領確認拒否も deny 監査が記録される（E2E-004）", async () => {
       const { deps, app } = await setup();
       await seedMembership(deps, STAFF_A, FACILITY_A);
