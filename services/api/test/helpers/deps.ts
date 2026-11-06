@@ -14,6 +14,7 @@ import {
   FakeOcrEngine,
   FakeOcrTaskQueue,
   FakePlacesGateway,
+  FakePushGateway,
   FakeStorageGateway,
 } from "./fakes.js";
 
@@ -30,6 +31,7 @@ export interface TestDeps extends Deps {
   fakeOcrQueue: FakeOcrTaskQueue;
   fakeLlm: FakeLlmAdapter;
   fakePlaces: FakePlacesGateway;
+  fakePush: FakePushGateway;
 }
 
 export function makeTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -86,6 +88,7 @@ export function makeTestDeps(
   const fakeOcrQueue = new FakeOcrTaskQueue();
   const fakeLlm = new FakeLlmAdapter();
   const fakePlaces = new FakePlacesGateway();
+  const fakePush = new FakePushGateway();
   const logger = pino({ level: "silent" });
 
   const deps: TestDeps = {
@@ -101,6 +104,7 @@ export function makeTestDeps(
     ocrQueue: fakeOcrQueue,
     llmAdapter: fakeLlm,
     placesGateway: fakePlaces,
+    pushGateway: fakePush,
     rateLimiter: new RateLimiter(clock),
     clock,
     logger,
@@ -112,6 +116,7 @@ export function makeTestDeps(
     fakeOcrQueue,
     fakeLlm,
     fakePlaces,
+    fakePush,
   };
   deps.uploadCompletion = {
     onUploadCompleted: async (p) => {
