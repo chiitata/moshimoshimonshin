@@ -32,6 +32,8 @@ export const AUDIT_ACTIONS = {
   // ---- OCR ----
   OCR_JOB_SUCCEEDED: "OCR_JOB_SUCCEEDED",
   OCR_JOB_FAILED: "OCR_JOB_FAILED",
+  /** 抽出候補（薬剤名等を含む）の閲覧。 */
+  OCR_EXTRACTION_READ: "OCR_EXTRACTION_READ",
   // ---- 配送・施設（#17〜#20 で発行予定） ----
   SUBMISSION_ACCEPTED: "SUBMISSION_ACCEPTED",
   DELIVERY_CREATED: "DELIVERY_CREATED",
@@ -41,7 +43,11 @@ export const AUDIT_ACTIONS = {
   // ---- 削除 ----
   ACCOUNT_DELETION_REQUESTED: "ACCOUNT_DELETION_REQUESTED",
   ACCOUNT_DELETION_CANCELLED: "ACCOUNT_DELETION_CANCELLED",
+  /** 削除ジョブのステップ失敗（retryable/terminal は outcome で区別）。 */
+  ACCOUNT_DELETION_FAILED: "ACCOUNT_DELETION_FAILED",
   ACCOUNT_PURGED: "ACCOUNT_PURGED",
+  /** 予定時刻+24h超過の未完了ジョブ（SLO-07 アラート）。 */
+  DELETION_JOB_OVERDUE: "DELETION_JOB_OVERDUE",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

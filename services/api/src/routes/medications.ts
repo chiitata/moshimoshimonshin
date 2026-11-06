@@ -55,7 +55,11 @@ export function registerMedicationRoutes(
       },
     },
     async (req) =>
-      getExtraction(deps, { uid: uidOf(req), jobId: req.params.jobId }),
+      getExtraction(deps, {
+        uid: uidOf(req),
+        jobId: req.params.jobId,
+        requestId: req.requestContext.requestId,
+      }),
   );
 
   // API-023

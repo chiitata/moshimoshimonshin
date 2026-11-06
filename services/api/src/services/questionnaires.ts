@@ -119,7 +119,11 @@ export async function getQuestionnaireDetail(
   if (doc === undefined || doc.patientUid !== params.uid) {
     throw ApiError.notFound("問診票が見つかりません。");
   }
-  // 閲覧監査: 所有確認を通過した読み取りのみ記録
+  const version = params.revision ?? doc.latestRevision;
+  if (version < 1 || version > doc.latestRevision) {
+    throw ApiError.notFound("指定された版が見つかりません。");
+  }
+  // 閲覧監査: 所有・版検証を通過した読み取りのみ記録
   await audit(deps, {
     actorType: "patient",
     actorUidHash: auditUidHash(deps, params.uid),
@@ -129,10 +133,6 @@ export async function getQuestionnaireDetail(
     ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
     outcome: "ok",
   });
-  const version = params.revision ?? doc.latestRevision;
-  if (version < 1 || version > doc.latestRevision) {
-    throw ApiError.notFound("指定された版が見つかりません。");
-  }
   const [revSnap, allRevisions] = await Promise.all([
     getDoc<QuestionnaireRevisionDoc>(
       deps.db,

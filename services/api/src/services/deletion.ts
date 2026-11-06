@@ -111,6 +111,8 @@ export async function requestDeletion(
     principal: params.uid,
     requestHash: requestHash(deps, {}),
     execute: async (tx) => {
+      // Firestore の競合再試行で push が重複しないよう都度リセットする
+      committedAudits.length = 0;
       const accountRef = deps.db.doc(`accounts/${params.uid}`);
       const accountSnap = await tx.get(accountRef);
       if (!accountSnap.exists) {
@@ -217,7 +219,7 @@ export async function requestDeletion(
         );
     } catch (err) {
       deps.logger.warn(
-        { err, uid: auditUidHash(deps, params.uid) },
+        { err, uidHash: auditUidHash(deps, params.uid) },
         "revokeRefreshTokens failed",
       );
     }
@@ -240,6 +242,8 @@ export async function cancelDeletion(
     principal: params.uid,
     requestHash: requestHash(deps, {}),
     execute: async (tx) => {
+      // Firestore の競合再試行で push が重複しないよう都度リセットする
+      committedAudits.length = 0;
       const accountRef = deps.db.doc(`accounts/${params.uid}`);
       const accountSnap = await tx.get(accountRef);
       if (!accountSnap.exists) {

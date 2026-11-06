@@ -73,7 +73,7 @@ export async function initUpload(
     );
   }
 
-  const { result } = await runIdempotent<{ uploadId: string }>(deps, {
+  const { result, replayed } = await runIdempotent<{ uploadId: string }>(deps, {
     namespace: "upload_init",
     key: params.idempotencyKey,
     principal: params.uid,
@@ -141,7 +141,8 @@ export async function initUpload(
     resourceType: "uploads",
     resourceIdHash: auditResourceHash(deps, result.uploadId),
     ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
-    outcome: "created",
+    // リプレイ時も署名URLは新規発行されるため、証跡として残すが outcome は区別する
+    outcome: replayed ? "url_reissued" : "created",
   });
 
   return { uploadId: result.uploadId, status: "pending", upload: instruction };

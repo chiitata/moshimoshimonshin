@@ -141,7 +141,11 @@ export async function registerEmail(
       now,
       // 期限切れ上書き時は既存UIDを引き継ぐ。新UIDではAuth側の
       // email-already-existsに阻まれて登録を復旧できなくなる。
-      { overwrite: operation !== undefined, uid: operation?.uid },
+      {
+        overwrite: operation !== undefined,
+        uid: operation?.uid,
+        requestId: params.requestId,
+      },
     );
   }
 
@@ -255,7 +259,7 @@ export async function registerEmail(
     outcome: "created",
     requestId: params.requestId,
     resourceType: "registrationOperation",
-    resourceIdHash: operationHash.slice(0, 32),
+    resourceIdHash: operationHash,
   });
 
   return {
@@ -361,7 +365,7 @@ async function reconcileEmailConflict(
     outcome: "conflict",
     requestId: params.requestId,
     resourceType: "registrationOperation",
-    resourceIdHash: operationHash.slice(0, 32),
+    resourceIdHash: operationHash,
   });
   throw ApiError.conflict(
     ErrorCodes.REGISTRATION_CONFLICT,
@@ -375,7 +379,11 @@ async function reserveOperation(
   reqHash: string,
   legalVersionSet: RegistrationOperationDoc["legalVersionSet"],
   now: Date,
-  opts: { overwrite?: boolean; uid?: string | undefined } = {},
+  opts: {
+    overwrite?: boolean;
+    uid?: string | undefined;
+    requestId?: string;
+  } = {},
 ): Promise<RegistrationOperationDoc> {
   // 期限切れ上書き時は既存UIDを再利用して孤児Authとの齟齬を防ぐ
   const uid = opts.uid ?? deps.db.collection("registrationOperations").doc().id;
@@ -405,6 +413,16 @@ async function reserveOperation(
       const data = existing.data() as RegistrationOperationDoc;
       if (data.requestHash === reqHash) return data;
     }
+    await audit(deps, {
+      actorType: "service",
+      action: AUDIT_ACTIONS.REGISTRATION_ATTEMPT,
+      outcome: "conflict",
+      ...(opts.requestId !== undefined
+        ? { requestId: opts.requestId }
+        : {}),
+      resourceType: "registrationOperation",
+      resourceIdHash: operationHash,
+    });
     throw ApiError.conflict(
       ErrorCodes.REGISTRATION_CONFLICT,
       "同じ登録キーで異なる内容が送信されました。",

@@ -60,6 +60,9 @@ export async function recordOnboardingConsents(
     principal: params.uid,
     requestHash: requestHash(deps, body),
     execute: async (tx) => {
+      // Firestore は競合時に execute を再試行する。再試行で push が
+      // 重複しロールバック分まで sink へ流れないよう都度リセットする
+      committedAudits.length = 0;
       const accountRef = deps.db.doc(`accounts/${params.uid}`);
       const snap = await tx.get(accountRef);
       const ts = FieldValue.serverTimestamp();

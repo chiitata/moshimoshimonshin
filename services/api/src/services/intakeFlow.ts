@@ -314,7 +314,7 @@ export async function finalizeIntake(
     }),
   );
 
-  const { result } = await runIdempotent<
+  const { result, replayed } = await runIdempotent<
     | { questionnaireId: string; questionnaireRevision: number }
     | typeof DRAFT_EXPIRED
   >(deps, {
@@ -402,14 +402,17 @@ export async function finalizeIntake(
     },
   });
   if ("kind" in result) throw draftExpiredError();
-  await audit(deps, {
-    actorType: "patient",
-    actorUidHash: auditUidHash(deps, params.uid),
-    action: AUDIT_ACTIONS.INTAKE_FINALIZED,
-    resourceType: "questionnaires",
-    resourceIdHash: auditResourceHash(deps, result.questionnaireId),
-    ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
-  });
+  // 冪等リプレイでは確定が起きていないため監査も発行しない
+  if (!replayed) {
+    await audit(deps, {
+      actorType: "patient",
+      actorUidHash: auditUidHash(deps, params.uid),
+      action: AUDIT_ACTIONS.INTAKE_FINALIZED,
+      resourceType: "questionnaires",
+      resourceIdHash: auditResourceHash(deps, result.questionnaireId),
+      ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
+    });
+  }
   return {
     intakeId: params.intakeId,
     questionnaireId: result.questionnaireId,

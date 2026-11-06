@@ -91,12 +91,22 @@ export function toMedicationResponse(
  */
 export async function getExtraction(
   deps: Deps,
-  params: { uid: string; jobId: string },
+  params: { uid: string; jobId: string; requestId?: string },
 ): Promise<ExtractionResponse> {
   const job = await getOcrJob(deps.db, params.jobId);
   if (!job || job.patientUid !== params.uid) {
     throw ApiError.notFound("抽出結果が見つかりません。");
   }
+  // 閲覧監査: 抽出候補は薬剤名等のPHIを含むため閲覧証跡を残す（値自体は記録しない）
+  await audit(deps, {
+    actorType: "patient",
+    actorUidHash: auditUidHash(deps, params.uid),
+    action: AUDIT_ACTIONS.OCR_EXTRACTION_READ,
+    resourceType: "ocrJobs",
+    resourceIdHash: auditResourceHash(deps, params.jobId),
+    ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
+    outcome: "ok",
+  });
   return {
     jobId: params.jobId,
     status: job.status,
@@ -161,63 +171,73 @@ export async function createMedication(
 
   const confirmationStatus: MedicationConfirmationStatus =
     body.confirmationStatus ?? "confirmed";
-  const { result } = await runIdempotent<{ medicationId: string }>(deps, {
-    namespace: "medication_create",
-    key: params.idempotencyKey,
-    principal: params.uid,
-    requestHash: requestHash(deps, body),
-    execute: async (tx) => {
-      const ref = deps.db.collection("medications").doc();
-      const now = deps.clock.now();
-      const doc: MedicationDoc = {
-        patientUid: params.uid,
-        displayName: body.displayName,
-        // OCR候補を既定値として利用者入力で上書き（FR-M04 の人手確認）
-        ...(body.genericName !== undefined
-          ? { genericName: body.genericName }
-          : {}),
-        strength:
-          body.strength !== undefined
-            ? body.strength
-            : (candidate?.strength ?? null),
-        instructionsText:
-          body.instructionsText !== undefined
-            ? body.instructionsText
-            : (candidate?.dosage ?? null),
-        quantity:
-          body.quantity !== undefined
-            ? body.quantity
-            : (candidate?.quantity ?? null),
-        prescribedAt:
-          body.prescribedAt !== undefined
-            ? body.prescribedAt
-            : (candidate?.prescribedAt ?? null),
-        currentStatus: body.currentStatus,
-        confirmationStatus,
-        sourceType,
-        ...(sourceUploadId !== undefined ? { uploadId: sourceUploadId } : {}),
-        ...(body.ocrJobId !== undefined ? { ocrJobId: body.ocrJobId } : {}),
-        attachToQuestionnaire: body.attachToQuestionnaire ?? false,
-        ...(confirmationStatus === "confirmed"
-          ? { userConfirmedAt: Timestamp.fromDate(now) }
-          : {}),
-        createdAt: Timestamp.fromDate(now),
-        updatedAt: Timestamp.fromDate(now),
-      };
-      tx.create(ref, doc as unknown as DocumentData);
-      return { medicationId: ref.id };
+  const { result, replayed } = await runIdempotent<{ medicationId: string }>(
+    deps,
+    {
+      namespace: "medication_create",
+      key: params.idempotencyKey,
+      principal: params.uid,
+      requestHash: requestHash(deps, body),
+      execute: async (tx) => {
+        const ref = deps.db.collection("medications").doc();
+        const now = deps.clock.now();
+        const doc: MedicationDoc = {
+          patientUid: params.uid,
+          displayName: body.displayName,
+          // OCR候補を既定値として利用者入力で上書き（FR-M04 の人手確認）
+          ...(body.genericName !== undefined
+            ? { genericName: body.genericName }
+            : {}),
+          strength:
+            body.strength !== undefined
+              ? body.strength
+              : (candidate?.strength ?? null),
+          instructionsText:
+            body.instructionsText !== undefined
+              ? body.instructionsText
+              : (candidate?.dosage ?? null),
+          quantity:
+            body.quantity !== undefined
+              ? body.quantity
+              : (candidate?.quantity ?? null),
+          prescribedAt:
+            body.prescribedAt !== undefined
+              ? body.prescribedAt
+              : (candidate?.prescribedAt ?? null),
+          currentStatus: body.currentStatus,
+          confirmationStatus,
+          sourceType,
+          ...(sourceUploadId !== undefined
+            ? { uploadId: sourceUploadId }
+            : {}),
+          ...(body.ocrJobId !== undefined
+            ? { ocrJobId: body.ocrJobId }
+            : {}),
+          attachToQuestionnaire: body.attachToQuestionnaire ?? false,
+          ...(confirmationStatus === "confirmed"
+            ? { userConfirmedAt: Timestamp.fromDate(now) }
+            : {}),
+          createdAt: Timestamp.fromDate(now),
+          updatedAt: Timestamp.fromDate(now),
+        };
+        tx.create(ref, doc as unknown as DocumentData);
+        return { medicationId: ref.id };
+      },
     },
-  });
+  );
 
-  await audit(deps, {
-    actorType: "patient",
-    actorUidHash: auditUidHash(deps, params.uid),
-    action: AUDIT_ACTIONS.MEDICATION_CREATED,
-    resourceType: "medications",
-    resourceIdHash: auditResourceHash(deps, result.medicationId),
-    requestId: params.requestId,
-    outcome: confirmationStatus,
-  });
+  // 冪等リプレイでは新規作成が起きていないため監査も発行しない
+  if (!replayed) {
+    await audit(deps, {
+      actorType: "patient",
+      actorUidHash: auditUidHash(deps, params.uid),
+      action: AUDIT_ACTIONS.MEDICATION_CREATED,
+      resourceType: "medications",
+      resourceIdHash: auditResourceHash(deps, result.medicationId),
+      requestId: params.requestId,
+      outcome: confirmationStatus,
+    });
+  }
 
   const created = await getMedication(deps.db, result.medicationId);
   if (!created) {

@@ -511,7 +511,7 @@ export class DeletionWorker {
     );
     await audit(this.deps, {
       actorType: "service",
-      action: AUDIT_ACTIONS.ACCOUNT_PURGED,
+      action: AUDIT_ACTIONS.ACCOUNT_DELETION_FAILED,
       outcome: terminal ? "failed_terminal" : "failed_retryable",
       resourceType: "deletionJobs",
       resourceIdHash: auditResourceHash(this.deps, jobId),
@@ -539,16 +539,17 @@ export class DeletionWorker {
       { jobId, overdueMs: nowMs - execMs },
       "deletion job overdue >24h — manual review required (SLO-07)",
     );
+    // マーカー永続化を先に行い、監査書込失敗時の再スキャン重複アラートを防ぐ
+    await this.deps.db.doc(`deletionJobs/${jobId}`).update({
+      overdueAlertedAt: FieldValue.serverTimestamp(),
+    });
     await audit(this.deps, {
       actorType: "service",
-      action: AUDIT_ACTIONS.ACCOUNT_PURGED,
+      action: AUDIT_ACTIONS.DELETION_JOB_OVERDUE,
       outcome: "overdue_alert",
       resourceType: "deletionJobs",
       resourceIdHash: auditResourceHash(this.deps, jobId),
       actorUidHash: auditUidHash(this.deps, job.subjectUid),
-    });
-    await this.deps.db.doc(`deletionJobs/${jobId}`).update({
-      overdueAlertedAt: FieldValue.serverTimestamp(),
     });
   }
 }

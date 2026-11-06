@@ -614,6 +614,37 @@ describe("監査イベント（#22）", () => {
     expect(ev.resourceIdHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it("finalize の冪等リプレイは INTAKE_FINALIZED を二重発行しない", async () => {
+    const { deps, app } = await setup();
+    const { intakeId } = await createIntake(app);
+    const rev = await toQuestioning(app, intakeId);
+    const sum = await app.inject({
+      method: "POST",
+      url: `/v1/intakes/${intakeId}/summary`,
+      headers: authHeader(UID),
+      payload: { expectedIntakeRevision: rev },
+    });
+    const srev = (sum.json() as { intakeRevision: number }).intakeRevision;
+    const payload = {
+      expectedIntakeRevision: srev,
+      summaryReviewConfirmed: true,
+    };
+    for (let i = 0; i < 2; i++) {
+      const res = await app.inject({
+        method: "POST",
+        url: `/v1/intakes/${intakeId}/finalize`,
+        headers: { ...authHeader(UID), ...idem("fin-replay") },
+        payload,
+      });
+      expect(res.statusCode).toBe(200);
+    }
+    const audits = await deps.memDb
+      .collection("auditEvents")
+      .where("action", "==", "INTAKE_FINALIZED")
+      .get();
+    expect(audits.size).toBe(1);
+  });
+
   it("GET /questionnaires/{id} は INTAKE_READ を記録し PHI を含まない", async () => {
     const { deps, app } = await setup();
     const { intakeId } = await createIntake(app);
