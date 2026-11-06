@@ -34,6 +34,12 @@ make down     # 全停止
 - 両方ともコミット禁止。本番・stgはGCP Secret Managerを使用
 - 詳細は [docs/07_環境構築手順書](docs/07_環境構築手順書.md) §4 と [ADR-0002](docs/adr/0002_ローカルのシークレット管理.md)
 
+### API のブラウザ接続
+
+設計上は患者 Web と API が別ドメインのため、API で許可元限定 CORS を使用します。`API_CORS_ORIGINS` にブラウザから見た正確な origin をカンマ区切りで指定します（パス、末尾スラッシュ、ワイルドカード不可。本番は HTTPS のみ）。`development` の未設定時は `http://localhost:5050` と `http://127.0.0.1:5050` のみ、`production` と `test` の未設定時または空文字は許可なしです。staging/production では実際に承認された公開 origin を明示し、変更後は API を再起動してください。ローカル Compose は `.env.local` を API に渡します。
+
+許可メソッドは GET / POST / PATCH / DELETE、許可ヘッダは Authorization / Content-Type / X-Firebase-AppCheck / Idempotency-Key / X-Request-Id です。Cookie 等の credentials は許可しません。CORS は認証・認可や App Check の代わりではなく、ブラウザ以外のアクセスを制限するものでもありません。Storage の署名 URL は別途 Storage 側の CORS 設定が必要です。
+
 ## ドキュメント
 
 - [docs/01_要件定義書](docs/01_要件定義書.md) / [02_システム設計書](docs/02_システム設計書.md) / [03_機能仕様書](docs/03_機能仕様書.md) / [04_DB設計書](docs/04_DB設計書.md) / [05_コスト試算表](docs/05_コスト試算表.md) / [06_医療安全_セキュリティ_運用設計書](docs/06_医療安全_セキュリティ_運用設計書.md)

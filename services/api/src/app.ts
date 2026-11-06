@@ -19,6 +19,7 @@ import { registerMedicationRoutes } from "./routes/medications.js";
 import { registerIntakeRoutes } from "./routes/intakes.js";
 import { registerQuestionnaireRoutes } from "./routes/questionnaires.js";
 import { registerInternalJobRoutes } from "./routes/internalJobs.js";
+import { registerCors } from "./lib/cors.js";
 
 /**
  * Fastify アプリケーションの組み立て。
@@ -71,6 +72,8 @@ export function buildApp(deps: Deps): FastifyInstance {
     req.requestContext = { requestId: req.id };
     void reply.header("x-request-id", req.id);
   });
+
+  registerCors(app, deps.config.corsOrigins);
 
   // ルートごとのアクセス階層を一括適用（認証→App Check→状態・同意→認可→レート）。
   // preValidation で実行し、スキーマ検証より先に保護パイプラインを通す（02 §4）。
