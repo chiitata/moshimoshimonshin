@@ -4,6 +4,13 @@ import { buildTestApp } from "../helpers/app.js";
 import { makeTestDeps } from "../helpers/deps.js";
 
 const origin = "http://localhost:5050";
+const localEmulators = {
+  FIREBASE_PROJECT_ID: "demo-mmr-dev",
+  FIRESTORE_EMULATOR_HOST: "localhost:8081",
+  FIREBASE_AUTH_EMULATOR_HOST: "localhost:9099",
+  FIREBASE_STORAGE_EMULATOR_HOST: "localhost:9199",
+  FIREBASE_DATABASE_EMULATOR_HOST: "localhost:9000",
+};
 const preflight = {
   origin,
   "access-control-request-method": "POST",
@@ -58,21 +65,21 @@ describe("CORS", () => {
   });
 
   it("設定ごとに許可元を切り替え、production は明示設定なしで拒否", async () => {
-    expect(loadConfig({ NODE_ENV: "development" }).corsOrigins).toEqual([origin, "http://127.0.0.1:5050"]);
-    const production = loadConfig({ NODE_ENV: "production", SERVER_HMAC_SECRET: "test-secret" });
+    expect(loadConfig({ ...localEmulators, NODE_ENV: "development" }).corsOrigins).toEqual([origin, "http://127.0.0.1:5050"]);
+    const production = loadConfig({ NODE_ENV: "production", FIREBASE_PROJECT_ID: "test-project", SERVER_HMAC_SECRET: "test-secret" });
     expect(production.corsOrigins).toEqual([]);
-    expect(() => loadConfig({ NODE_ENV: "production", SERVER_HMAC_SECRET: "test-secret", API_CORS_ORIGINS: "http://example.com" })).toThrow("API_CORS_ORIGINS");
-    const configured = loadConfig({ NODE_ENV: "production", SERVER_HMAC_SECRET: "test-secret", API_CORS_ORIGINS: "https://app.example, https://other.example" });
+    expect(() => loadConfig({ NODE_ENV: "production", FIREBASE_PROJECT_ID: "test-project", SERVER_HMAC_SECRET: "test-secret", API_CORS_ORIGINS: "http://example.com" })).toThrow("API_CORS_ORIGINS");
+    const configured = loadConfig({ NODE_ENV: "production", FIREBASE_PROJECT_ID: "test-project", SERVER_HMAC_SECRET: "test-secret", API_CORS_ORIGINS: "https://app.example, https://other.example" });
     const app = buildTestApp(makeTestDeps({ corsOrigins: configured.corsOrigins }));
     const denied = await app.inject({ method: "OPTIONS", url: "/v1/me", headers: preflight });
     const allowed = await app.inject({ method: "OPTIONS", url: "/v1/me", headers: { ...preflight, origin: "https://app.example" } });
     expect(denied.statusCode).toBe(403);
     expect(allowed.statusCode).toBe(204);
     await app.close();
-    expect(loadConfig({ API_CORS_ORIGINS: "" }).corsOrigins).toEqual([]);
+    expect(loadConfig({ ...localEmulators, API_CORS_ORIGINS: "" }).corsOrigins).toEqual([]);
   });
 
   it.each(["*", "null", "https://example.com/", "https://example.com/path", "https://user@example.com", "https://example.com,", "https://EXAMPLE.com"])("不正な設定 %s は起動時に拒否", (value) => {
-    expect(() => loadConfig({ API_CORS_ORIGINS: value })).toThrow("API_CORS_ORIGINS");
+    expect(() => loadConfig({ ...localEmulators, API_CORS_ORIGINS: value })).toThrow("API_CORS_ORIGINS");
   });
 });
