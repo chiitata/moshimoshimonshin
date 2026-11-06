@@ -13,6 +13,8 @@ import {
   FakeLlmAdapter,
   FakeOcrEngine,
   FakeOcrTaskQueue,
+  FakePlacesGateway,
+  FakePushGateway,
   FakeStorageGateway,
 } from "./fakes.js";
 
@@ -28,6 +30,8 @@ export interface TestDeps extends Deps {
   fakeOcrEngine: FakeOcrEngine;
   fakeOcrQueue: FakeOcrTaskQueue;
   fakeLlm: FakeLlmAdapter;
+  fakePlaces: FakePlacesGateway;
+  fakePush: FakePushGateway;
 }
 
 export function makeTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -45,6 +49,7 @@ export function makeTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     appCheckMode: "permissive",
     internalJobToken: "test-internal-token",
     apiDocsEnabled: true,
+    corsOrigins: [],
     reauthWindowSeconds: 900,
     deletionGracePeriodDays: 30,
     deletionJobMaxAttempts: 5,
@@ -64,6 +69,10 @@ export function makeTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     vertexAiModel: "gemini-2.5-flash-lite",
     vertexAiLocation: "asia-northeast1",
     vertexAiTimeoutMs: 10_000,
+    healthzProbeTimeoutMs: 2_000,
+    healthzProbeCacheMs: 5_000,
+    googlePlacesApiKey: undefined,
+    placesMaxResults: 10,
     ...overrides,
   });
 }
@@ -81,6 +90,8 @@ export function makeTestDeps(
   const fakeOcrEngine = new FakeOcrEngine();
   const fakeOcrQueue = new FakeOcrTaskQueue();
   const fakeLlm = new FakeLlmAdapter();
+  const fakePlaces = new FakePlacesGateway();
+  const fakePush = new FakePushGateway();
   const logger = pino({ level: "silent" });
 
   const deps: TestDeps = {
@@ -95,6 +106,8 @@ export function makeTestDeps(
     ocrEngine: fakeOcrEngine,
     ocrQueue: fakeOcrQueue,
     llmAdapter: fakeLlm,
+    placesGateway: fakePlaces,
+    pushGateway: fakePush,
     rateLimiter: new RateLimiter(clock),
     clock,
     logger,
@@ -105,6 +118,8 @@ export function makeTestDeps(
     fakeOcrEngine,
     fakeOcrQueue,
     fakeLlm,
+    fakePlaces,
+    fakePush,
   };
   deps.uploadCompletion = {
     onUploadCompleted: async (p) => {

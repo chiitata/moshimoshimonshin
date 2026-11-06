@@ -13,12 +13,18 @@ export type OnboardingState =
   | "profile_pending"
   | "completed";
 
-export type ConsentType =
-  | "terms_of_service"
-  | "privacy_policy_ack"
-  | "health_data_collection"
-  | "hospital_disclosure"
-  | "optional_analytics";
+export const CONSENT_TYPES = [
+  "terms_of_service",
+  "privacy_policy_ack",
+  "health_data_collection",
+  "hospital_disclosure",
+  "optional_analytics",
+] as const;
+
+export type ConsentType = (typeof CONSENT_TYPES)[number];
+
+/** 既知の同意種別かの判定用（CONSENT_TYPES の Set 化。全モジュールで共有）。 */
+export const CONSENT_TYPE_SET: ReadonlySet<string> = new Set(CONSENT_TYPES);
 
 export type RegistrationSource =
   | "email_registration"
@@ -77,6 +83,21 @@ export type MedicationSourceType =
   | "manual"
   | "prescription_photo"
   | "medication_notebook";
+
+/** 04 §5.10 配送状態機械（02 §9）。 */
+export type DeliveryStatus =
+  | "created"
+  | "delivered"
+  | "acknowledged"
+  | "failed"
+  | "revoked";
+
+/** 施設審査状態。 */
+export type FacilityVerificationStatus =
+  | "pending"
+  | "verified"
+  | "rejected"
+  | "suspended";
 
 /** 04 §5.4 問診進行状態。archived は期限切れ・中断終端。 */
 export type IntakeStatus =

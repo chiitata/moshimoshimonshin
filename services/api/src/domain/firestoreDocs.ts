@@ -2,8 +2,10 @@ import type {
   AccountStatus,
   AnswerState,
   ConsentType,
+  DeliveryStatus,
   DeletionJobStatus,
   DeletionStepStatus,
+  FacilityVerificationStatus,
   IntakeStatus,
   MedicationConfirmationStatus,
   MedicationCurrentStatus,
@@ -18,6 +20,7 @@ import type {
   UploadSourcePurpose,
   UploadStatus,
 } from "./types.js";
+import type { AuditAction } from "./auditEvents.js";
 import type { OcrCandidate } from "./ocr.js";
 
 /** Timestamp は Timestamp（fake側も同型）として扱う。 */
@@ -330,10 +333,81 @@ export interface QuestionnaireRevisionDoc {
   createdAt: unknown;
 }
 
+/** 04 §5.8 facilities/{facilityId}。 */
+export interface FacilityDoc {
+  facilityId: string;
+  legalName: string;
+  displayName: string;
+  placeId?: string;
+  address?: Record<string, unknown>;
+  verificationStatus: FacilityVerificationStatus;
+  receivingEnabled: boolean;
+  serviceAgreementVersion: string;
+  verifiedAt?: unknown;
+  verificationRecordId?: string;
+  /** 運営の受付停止（API-037）時刻・理由。receivingEnabled=false の根拠。 */
+  receivingDisabledAt?: unknown;
+  receivingDisabledReason?: string;
+  createdAt: unknown;
+  updatedAt: unknown;
+}
+
+/**
+ * facilityVerificationRecords/{recordId}（FR-H04, O-001）。
+ * 施設本人確認の検証証跡。審査担当者と確認項目を記録し、
+ * 施設docの verificationRecordId から参照される。
+ * 患者情報（PHI）は含めない。サーバ内参照のみでAPI経由では返さない。
+ */
+export interface FacilityVerificationRecordDoc {
+  facilityId: string;
+  /** 審査した運営者の UID（サーバ内の責任追跡用）。 */
+  verifierUid: string;
+  /** FR-H04 の4検証項目。承認には全て true が必須。 */
+  checks: {
+    /** 実在確認。 */
+    existence: boolean;
+    /** 申請者の確認。 */
+    applicant: boolean;
+    /** 受信担当者の確認。 */
+    receiverContact: boolean;
+    /** 所在地の確認。 */
+    location: boolean;
+  };
+  /** 検証に用いた文書・記録への参照。 */
+  verificationRecordId: string;
+  note: string | null;
+  createdAt: unknown;
+}
+
+/** 04 §5.10 deliveries/{deliveryId}（PHI、送信後施設宛コピー）。 */
+export interface DeliveryDoc {
+  senderUid: string;
+  facilityId: string;
+  questionnaireId: string;
+  questionnaireRevisionId: string;
+  consentId: string;
+  shareScope: {
+    includeProfile: boolean;
+    includeConfirmedMedications: boolean;
+    includePrescriptionImages: boolean;
+  };
+  patientIdentitySnapshot: Record<string, unknown>;
+  questionnaireSnapshot: Record<string, unknown>;
+  snapshotSha256: string;
+  status: DeliveryStatus;
+  idempotencyKeyHash: string;
+  facilityRetentionPolicyVersion: string;
+  createdAt: unknown;
+  deliveredAt?: unknown;
+  acknowledgedAt?: unknown;
+  receivedByStaffUid?: string;
+  updatedAt?: unknown;
+}
+
 export interface AuditEventDoc {
   actorType: "patient" | "staff" | "platform" | "service";
   actorUidHash?: string;
-  action: string;
+  action: AuditAction;
   resourceType?: string;
   resourceIdHash?: string;
   facilityId?: string;
@@ -343,4 +417,21 @@ export interface AuditEventDoc {
   outcome?: string;
   details?: Record<string, string | number | boolean>;
   policyVersion?: string;
+}
+
+/**
+ * pushDevices/{deviceId}（04 §5.15、FCM送信基盤）。
+ * deviceId は `pdv_` + HMAC(token) の決定論的ID（再登録は同一doc更新で冪等）。
+ * token はFCM registration token/FIDベーストークン。症状等のPHIは含めない。
+ * status: active=送信対象 / invalid=FCMが未登録・不正を返し無効化済み。
+ */
+export interface PushDeviceDoc {
+  patientUid: string;
+  token: string;
+  platform: "android" | "ios" | "web";
+  status: "active" | "invalid";
+  invalidatedReason: string | null;
+  createdAt: unknown;
+  updatedAt: unknown;
+  lastSeenAt: unknown;
 }

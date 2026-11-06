@@ -6,7 +6,7 @@ Flutter の Android / iOS / Web 向けデモ雛形です。現在は準備画面
 
 ルートの `make up` は Firebase Emulator と Flutter Web を起動します。Flutter SDK と稼働中の Docker が必要です。患者アプリだけを起動するには、エミュレータを別途起動した上で `make patient-start` を使ってください。起動の成否は `make logs-patient` と http://localhost:5050 で確認します。
 
-この雛形は `USE_FIREBASE_EMULATOR=true` と `FIREBASE_PROJECT_ID=demo-mmr-dev` が明示された場合にのみ Firebase を初期化し、実環境への接続は未対応です。これらは Makefile のデフォルト設定に含まれます。Android エミュレータからは `10.0.2.2`、Web と iOS シミュレータからは `localhost` を使用します。実機では開発機の到達可能なホストを `--dart-define=FIREBASE_EMULATOR_HOST=<host>` で指定し、エミュレータのネットワーク公開に注意してください。Messaging はネイティブ SDK による外部への自動登録を避けるため、通知実装時まで依存を追加しません。
+この雛形は `USE_FIREBASE_EMULATOR=true` と `FIREBASE_PROJECT_ID=demo-mmr-dev` が明示された場合にのみ Firebase を初期化し、実環境への接続は未対応です。これらは Makefile のデフォルト設定に含まれます。Firebase には単一のホストガードが入っており、許可されるのは `localhost` と `127.0.0.1`、そして Android 非 Web ビルドだけが `10.0.2.2` のみです。比較は完全一致・大文字小文字区別で、`localhost:9099` のようなポート付きや `localhost.evil.example` のような類似値は拒否され、Firebase を初期化する前に `StateError` になります。`--dart-define=FIREBASE_EMULATOR_HOST=<host>` で上書きする場合もこの範囲で、範囲外のホストを指定すると起動時に失敗します。デフォルトは Android エミュレータが `10.0.2.2`、それ以外（Web / iOS シミュレータ）が `localhost` です。つまり Android エミュレータからは `10.0.2.2`、Web と iOS シミュレータからは `localhost` を使い、物理端末（実機）から開発機の LAN IP など任意の LAN ホストで接続する構成は未対応です。エミュレータを外部ネットワークに公開することも想定していません。Messaging はネイティブ SDK による外部への自動登録を避けるため、通知実装時まで依存を追加しません。
 
 ### ブラウザで画面を確認する
 
@@ -32,6 +32,12 @@ nix develop --command bash apps/patient/preview.sh symptom
 
 Android Emulator での確認には別途 Android SDK、エミュレータとシステムイメージ、仮想化対応環境が必要です。iOS のエミュレータやビルドには macOS と Xcode が必要です。
 
+症状入力の独立プレビューは Flutter SDK を用意し、`apps/patient` で次を実行して http://localhost:5052 を開いて確認できます。確認後は Ctrl+C で停止します。Nix は不要です。入力は画面内だけに保持し、保存・送信しません。実際の症状や個人情報ではなく架空の内容を使用してください。
+
+```sh
+flutter run -d web-server --web-hostname=localhost --web-port=5052 -t lib/demo_symptom_preview.dart
+```
+
 ホーム画面の見た目を単独で確認するには、Flutter SDK を用意し、`apps/patient` から以下を実行してブラウザで http://localhost:5051 を開きます。確認後は Ctrl+C で停止します。Nix は不要です。このプレビューは認証や API に接続せず、各操作は未実装です。
 
 ```sh
@@ -41,3 +47,13 @@ flutter run -d web-server --web-hostname=localhost --web-port=5051 -t lib/demo_h
 ## 検証
 
 `apps/patient` で `flutter pub get`、`flutter analyze`、`flutter test` を実行します。iOS のビルドには macOS と Xcode が別途必要です。Android のビルドにも対応する SDK が必要です。
+
+## 認証方式選択プレビュー
+
+認証方式選択（P-003）の見た目を単独で確認できます。Flutter SDK を用意し、`apps/patient` で次を実行して http://localhost:5056 を開きます。確認後は Ctrl+C で停止します。このプレビューは認証・API に接続せず、選択操作は未接続です。実患者情報は入力しないでください。
+
+```sh
+flutter run -d web-server --web-hostname=localhost --web-port=5056 -t lib/demo_auth_method_preview.dart
+```
+
+Passkey は審査承認まで既定で非表示です。表示状態だけを確認する場合は、承認済みのレビュー環境に限り `--dart-define=PASSKEY_AUTH_ENABLED=true` を追加します。このフラグは公開承認を意味しません。
