@@ -3,7 +3,19 @@ import type {
   AppCheckVerifier,
   AuthVerifier,
 } from "../../src/domain/types.js";
-import type { AuthAdmin, StorageDeleter } from "../../src/deps.js";
+import type {
+  AuthAdmin,
+  ContentScanner,
+  LlmAdapter,
+  OcrEngine,
+  OcrTaskQueue,
+  QuestionGenInput,
+  QuestionGenOutput,
+  StorageGateway,
+  StoredObjectInfo,
+  UploadUrlInstruction,
+} from "../../src/deps.js";
+import type { OcrEngineResult } from "../../src/domain/ocr.js";
 
 /** "token-<uid>" 形式のトークンを受理する検証フェイク。 */
 export class FakeAuthVerifier implements AuthVerifier {
@@ -103,13 +115,39 @@ export class FakeAuthAdmin implements AuthAdmin {
   }
 }
 
-export class FakeStorageDeleter implements StorageDeleter {
+interface SeededObject {
+  data: Uint8Array;
+  contentType: string;
+  generation: string;
+}
+
+/** インメモリ StorageGateway。seedObject で実オブジェクトを用意する。 */
+export class FakeStorageGateway implements StorageGateway {
   deleted: Array<{
     bucket: string;
     path: string;
     generation?: string | undefined;
   }> = [];
   failOn = new Set<string>(); // "bucket/path"
+  uploadUrlCalls: Array<{ bucket: string; objectPath: string }> = [];
+  private objects = new Map<string, SeededObject>();
+
+  private key(bucket: string, objectPath: string): string {
+    return `${bucket}/${objectPath}`;
+  }
+
+  seedObject(
+    bucket: string,
+    objectPath: string,
+    data: Uint8Array,
+    contentType: string,
+  ): void {
+    this.objects.set(this.key(bucket, objectPath), {
+      data,
+      contentType,
+      generation: `${Date.now()}-${this.objects.size}`,
+    });
+  }
 
   async deleteObject(
     bucket: string,
@@ -120,5 +158,129 @@ export class FakeStorageDeleter implements StorageDeleter {
       throw new Error("storage/delete failed");
     }
     this.deleted.push({ bucket, path: objectPath, generation });
+    this.objects.delete(this.key(bucket, objectPath));
+  }
+
+  tombstoned: Array<{ bucket: string; path: string }> = [];
+
+  async tombstoneObject(bucket: string, objectPath: string): Promise<void> {
+    if (this.failOn.has(`${bucket}/${objectPath}`)) {
+      throw new Error("storage/tombstone failed");
+    }
+    this.tombstoned.push({ bucket, path: objectPath });
+    const key = this.key(bucket, objectPath);
+    const obj = this.objects.get(key);
+    this.objects.set(key, {
+      data: new Uint8Array(0),
+      contentType: "application/octet-stream",
+      generation: `${obj?.generation ?? "0"}-t`,
+    });
+  }
+
+  async inspectObject(
+    bucket: string,
+    objectPath: string,
+  ): Promise<StoredObjectInfo | null> {
+    const obj = this.objects.get(this.key(bucket, objectPath));
+    if (!obj) return null;
+    return {
+      generation: obj.generation,
+      sizeBytes: obj.data.length,
+      contentType: obj.contentType,
+      md5HashBase64: null,
+    };
+  }
+
+  async createUploadUrl(params: {
+    bucket: string;
+    objectPath: string;
+    mimeType: string;
+    expiresAt: Date;
+  }): Promise<UploadUrlInstruction> {
+    this.uploadUrlCalls.push({ bucket: params.bucket, objectPath: params.objectPath });
+    return {
+      method: "PUT",
+      url: `https://storage.test/${params.bucket}/${params.objectPath}?sig=fake`,
+      headers: {
+        "content-type": params.mimeType,
+        "x-goog-if-generation-match": "0",
+      },
+      expiresAt: params.expiresAt.toISOString(),
+    };
+  }
+
+  async readObjectPrefix(
+    bucket: string,
+    objectPath: string,
+    maxBytes: number,
+  ): Promise<Uint8Array> {
+    if (this.failOn.has(`${bucket}/${objectPath}`)) {
+      throw new Error("storage/read failed");
+    }
+    const obj = this.objects.get(this.key(bucket, objectPath));
+    if (!obj) throw new Error("storage/object-not-found");
+    return obj.data.slice(0, maxBytes);
+  }
+
+  async readObject(bucket: string, objectPath: string): Promise<Uint8Array> {
+    const obj = this.objects.get(this.key(bucket, objectPath));
+    if (!obj) throw new Error("storage/object-not-found");
+    return obj.data;
   }
 }
+
+export class FakeOcrEngine implements OcrEngine {
+  readonly name = "fake";
+  result: OcrEngineResult = { ok: true, candidates: [] };
+  calls = 0;
+  shouldThrow = false;
+
+  async extract(): Promise<OcrEngineResult> {
+    this.calls++;
+    if (this.shouldThrow) throw new Error("ocr/engine-threw");
+    return this.result;
+  }
+}
+
+export class FakeOcrTaskQueue implements OcrTaskQueue {
+  enqueued: string[] = [];
+  failNext = false;
+
+  async enqueueOcrJob(jobId: string): Promise<void> {
+    if (this.failNext) {
+      this.failNext = false;
+      throw new Error("tasks/enqueue-failed");
+    }
+    this.enqueued.push(jobId);
+  }
+}
+
+/** 試験用LLMアダプタ。戻り値・例外を自在に制御できる。 */
+export class FakeLlmAdapter implements LlmAdapter {
+  readonly name = "fake";
+  result: QuestionGenOutput | null = null;
+  shouldThrow: unknown = null;
+  calls: QuestionGenInput[] = [];
+
+  generateQuestions(input: QuestionGenInput): Promise<QuestionGenOutput> {
+    this.calls.push(input);
+    if (this.shouldThrow !== null) return Promise.reject(this.shouldThrow);
+    return Promise.resolve(
+      this.result ?? { questions: [], modelVersion: "fake-v1" },
+    );
+  }
+}
+
+export class FakeContentScanner implements ContentScanner {
+  verdict: "clean" | "rejected" = "clean";
+  reason: string | undefined;
+  calls = 0;
+
+  async scanUpload(): Promise<{ verdict: "clean" | "rejected"; reason?: string }> {
+    this.calls++;
+    return this.verdict === "rejected"
+      ? { verdict: "rejected", ...(this.reason !== undefined ? { reason: this.reason } : {}) }
+      : { verdict: "clean" };
+  }
+}
+

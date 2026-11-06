@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { UPLOAD_ALLOWED_MIME_TYPES } from "./uploads.js";
+import { BODY_LOCATIONS, INTAKE_SYMPTOM_MAX_CHARS } from "./intake.js";
 
 const KANA_PATTERN = /^[ァ-ヶー・\s]+$/u;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -170,3 +172,167 @@ export const REQUIRED_PROFILE_FIELDS = [
 ] as const;
 
 export const emptyBodySchema = z.object({}).strict();
+
+/**
+ * API-019 POST /uploads/init。拡張子ではなく MIME・容量・SHA-256 を申告させる。
+ * 実ファイルとの一致は complete 時にサーバが検証する（クライアント申告を信用しない）。
+ */
+export const uploadInitBodySchema = z
+  .object({
+    fileName: z.string().trim().min(1).max(200).optional(),
+    mimeType: z.enum(UPLOAD_ALLOWED_MIME_TYPES),
+    // 上限超過はサービス層で 413 FILE_TOO_LARGE を返す（03 §4.2）
+    bytes: z.number().int().min(1, "ファイルが空です。"),
+    sha256: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .regex(/^[0-9a-f]{64}$/, "SHA-256 の形式が不正です。"),
+    sourcePurpose: z.enum(["prescription_photo", "medication_notebook"]),
+  })
+  .strict();
+export type UploadInitBody = z.infer<typeof uploadInitBodySchema>;
+
+/**
+ * API-023 POST /medications（本人確認済み薬剤登録）。
+ * OCR由来は ocrJobId(+candidateId) を付すと出所・証跡が保存される。
+ * currentStatus は利用者の明示が必須（FR-M05）。未確認のまま登録する場合は
+ * confirmationStatus="unconfirmed" を指定する（E2E-003）。
+ */
+export const medicationCreateSchema = z
+  .object({
+    displayName: z.string().trim().min(1, "薬剤名を入力してください。").max(200),
+    genericName: z.string().trim().max(200).optional(),
+    // OCR候補の誤値を利用者が明示的に消せるよう null 許容（FR-M04）。
+    // undefined は候補値の引継ぎ、null はクリア、文字列は上書き。
+    strength: z.string().trim().max(100).nullable().optional(),
+    instructionsText: z.string().trim().max(500).nullable().optional(),
+    quantity: z.string().trim().max(100).nullable().optional(),
+    prescribedAt: z
+      .string()
+      .trim()
+      .regex(DATE_PATTERN, "処方日は YYYY-MM-DD 形式で入力してください。")
+      .nullable()
+      .optional(),
+    currentStatus: z.enum(["taking", "past", "not_sure"]),
+    confirmationStatus: z.enum(["confirmed", "unconfirmed"]).optional(),
+    ocrJobId: z.string().min(1).max(200).optional(),
+    candidateId: z.string().min(1).max(200).optional(),
+    attachToQuestionnaire: z.boolean().optional(),
+  })
+  .strict();
+export type MedicationCreateBody = z.infer<typeof medicationCreateSchema>;
+
+/** API-025 PATCH /medications/{id}。出所フィールドは変更不可。 */
+export const medicationPatchSchema = z
+  .object({
+    displayName: z.string().trim().min(1).max(200).optional(),
+    genericName: z.string().trim().max(200).nullable().optional(),
+    strength: z.string().trim().max(100).nullable().optional(),
+    instructionsText: z.string().trim().max(500).nullable().optional(),
+    quantity: z.string().trim().max(100).nullable().optional(),
+    prescribedAt: z
+      .string()
+      .trim()
+      .regex(DATE_PATTERN)
+      .nullable()
+      .optional(),
+    currentStatus: z.enum(["taking", "past", "not_sure"]).optional(),
+    confirmationStatus: z
+      .enum(["unconfirmed", "confirmed", "rejected"])
+      .optional(),
+    attachToQuestionnaire: z.boolean().optional(),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, {
+    message: "更新する項目を指定してください。",
+  });
+export type MedicationPatchBody = z.infer<typeof medicationPatchSchema>;
+
+/** API-009 POST /intakes。 */
+export const intakeCreateSchema = z
+  .object({
+    questionnaireTemplateVersion: z.string().trim().max(50).optional(),
+    locale: z.string().trim().max(10).optional(),
+  })
+  .strict();
+export type IntakeCreateBody = z.infer<typeof intakeCreateSchema>;
+
+/** API-011 POST /intakes/{id}/symptoms（FR-I01/I02）。 */
+export const intakeSymptomsSchema = z
+  .object({
+    initialSymptomText: z
+      .string()
+      .max(
+        INTAKE_SYMPTOM_MAX_CHARS,
+        `症状は${INTAKE_SYMPTOM_MAX_CHARS}文字以内で入力してください。`,
+      ),
+    bodyLocations: z
+      .array(z.enum(BODY_LOCATIONS))
+      .max(BODY_LOCATIONS.length)
+      .default([]),
+    expectedIntakeRevision: z.number().int().min(1),
+  })
+  .strict();
+export type IntakeSymptomsBody = z.infer<typeof intakeSymptomsSchema>;
+
+/**
+ * API-013 POST /intakes/{id}/answers。
+ * 表示時の questionRevision と intake revision を必須化（stale検出, 04 §9.1）。
+ */
+export const intakeAnswerSchema = z
+  .object({
+    questionId: z.string().min(1).max(200),
+    questionRevision: z.number().int().min(1),
+    selectedCodes: z.array(z.string().min(1).max(50)).max(10).default([]),
+    freeText: z.string().max(2000).nullish(),
+    answerState: z.enum(["answered", "unknown", "skipped"]),
+    expectedIntakeRevision: z.number().int().min(1),
+  })
+  .strict();
+export type IntakeAnswerBody = z.infer<typeof intakeAnswerSchema>;
+
+/** API-014 PATCH /answers/{answerId} — answers の docId は questionId。 */
+export const intakeAnswerPatchSchema = z
+  .object({
+    questionRevision: z.number().int().min(1),
+    selectedCodes: z.array(z.string().min(1).max(50)).max(10).optional(),
+    freeText: z.string().max(2000).nullable().optional(),
+    answerState: z.enum(["answered", "unknown", "skipped"]).optional(),
+    expectedIntakeRevision: z.number().int().min(1),
+  })
+  .strict()
+  .refine((v) => v.selectedCodes !== undefined || v.freeText !== undefined || v.answerState !== undefined, {
+    message: "更新する項目を指定してください。",
+  });
+export type IntakeAnswerPatchBody = z.infer<typeof intakeAnswerPatchSchema>;
+
+/** API-012 POST /intakes/{id}/next-question。 */
+export const intakeNextQuestionSchema = z
+  .object({
+    expectedIntakeRevision: z.number().int().min(1),
+  })
+  .strict();
+export type IntakeNextQuestionBody = z.infer<
+  typeof intakeNextQuestionSchema
+>;
+
+/** API-015 POST /intakes/{id}/summary（review 遷移を要求）。 */
+export const intakeSummarySchema = z
+  .object({
+    expectedIntakeRevision: z.number().int().min(1),
+  })
+  .strict();
+export type IntakeSummaryBody = z.infer<typeof intakeSummarySchema>;
+
+/**
+ * API-016 POST /intakes/{id}/finalize。
+ * VAL-007: 未レビュー確定は不可。summaryReviewConfirmed=true が必須。
+ */
+export const intakeFinalizeSchema = z
+  .object({
+    expectedIntakeRevision: z.number().int().min(1),
+    summaryReviewConfirmed: z.literal(true),
+  })
+  .strict();
+export type IntakeFinalizeBody = z.infer<typeof intakeFinalizeSchema>;

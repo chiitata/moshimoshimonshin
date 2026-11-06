@@ -40,6 +40,62 @@ export type DeletionJobStatus =
   | "failed"
   | "cancelled";
 
+export type UploadStatus =
+  | "pending"
+  | "uploaded"
+  | "rejected"
+  | "expired"
+  | "deleted";
+
+export type UploadSourcePurpose = "prescription_photo" | "medication_notebook";
+
+export type OcrJobStatus = "queued" | "running" | "succeeded" | "failed";
+
+/**
+ * OCR失敗分類（02 §8, FR-O06）。engine_unavailable は再試行可能。
+ * page_limit_exceeded / upload_invalid は前処理時の終端失敗。
+ */
+export type OcrFailureCode =
+  | "not_prescription"
+  | "image_unclear"
+  | "indeterminate"
+  | "engine_unavailable"
+  | "page_limit_exceeded"
+  | "upload_invalid"
+  | "worker_interrupted";
+
+/** FR-M05: 服薬状況を必ず明示（不明も状態として保存）。 */
+export type MedicationCurrentStatus = "taking" | "past" | "not_sure";
+
+/** VAL-013/FR-M04: 抽出候補は利用者確認まで confirmed にしない。 */
+export type MedicationConfirmationStatus =
+  | "unconfirmed"
+  | "confirmed"
+  | "rejected";
+
+export type MedicationSourceType =
+  | "manual"
+  | "prescription_photo"
+  | "medication_notebook";
+
+/** 04 §5.4 問診進行状態。archived は期限切れ・中断終端。 */
+export type IntakeStatus =
+  | "draft"
+  | "safety_check"
+  | "questioning"
+  | "review"
+  | "finalized"
+  | "archived";
+
+/** 質問生成元。modelVersion に APIキー・患者内容を含めない。 */
+export type QuestionGeneratedBy = "fixed_template" | "llm" | "fallback";
+
+/** 回答編集で分岐が変わった後続質問は invalidated。 */
+export type QuestionStatus = "active" | "invalidated" | "answered";
+
+/** 空文字と未回答を区別する（unknown=分からない、skipped=回答しない）。 */
+export type AnswerState = "answered" | "unknown" | "skipped";
+
 export type DeletionStepStatus = "pending" | "running" | "succeeded" | "failed";
 
 export type RegistrationOperationStatus =
