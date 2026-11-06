@@ -66,6 +66,18 @@ export async function listDeliveriesByFacility(
   opts?: { cursor?: string; limit?: number },
 ): Promise<DeliveryListResult> {
   const pageSize = opts?.limit ?? 20;
+
+  // カーソルは直前ページ末尾の deliveryId。そのソート値で startAfter する。
+  // 失効・他院のカーソルは空ページを返し、ページネーションを安全に打ち切る。
+  let startAfterValues: unknown[] | undefined;
+  if (opts?.cursor) {
+    const cur = await getDoc<DeliveryDoc>(db, `deliveries/${opts.cursor}`);
+    if (!cur.exists || !cur.data || cur.data.facilityId !== facilityId) {
+      return { items: [], nextCursor: null };
+    }
+    startAfterValues = [cur.data.deliveredAt, cur.data.createdAt];
+  }
+
   const rows = await queryDocs<DeliveryDoc>(
     db,
     "deliveries",
@@ -75,6 +87,7 @@ export async function listDeliveriesByFacility(
         { field: "deliveredAt", direction: "desc" },
         { field: "createdAt", direction: "desc" },
       ],
+      ...(startAfterValues ? { startAfterValues } : {}),
       limit: pageSize + 1,
     },
   );

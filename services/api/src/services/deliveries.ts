@@ -142,7 +142,9 @@ export async function createDelivery(
         patientIdentitySnapshot: {},
         questionnaireSnapshot: snapshot,
         snapshotSha256,
-        status: "created",
+        // 施設側コピーは同期的に作成されるため作成=配送済み（created→delivered はtx内で完結）
+        status: "delivered",
+        deliveredAt: now,
         idempotencyKeyHash: keyHash,
         facilityRetentionPolicyVersion: "v1",
         createdAt: now,

@@ -157,6 +157,7 @@ class MemQuery {
     protected conditions: Condition[] = [],
     protected orders: Array<{ field: string; dir: "asc" | "desc" }> = [],
     protected limitN?: number,
+    protected afterValues?: unknown[],
   ) {}
 
   where(field: string, op: string, value: unknown): this {
@@ -169,6 +170,10 @@ class MemQuery {
   }
   limit(n: number): this {
     this.limitN = n;
+    return this;
+  }
+  startAfter(...values: unknown[]): this {
+    this.afterValues = values;
     return this;
   }
 
@@ -189,6 +194,20 @@ class MemQuery {
           getField(b.data()!, o.field),
         );
         return o.dir === "desc" ? -c : c;
+      });
+    }
+    // startAfter: ソート順でカーソル値より「後」にあるものだけ残す
+    if (this.afterValues?.length && this.orders.length) {
+      const vals = this.afterValues;
+      results = results.filter((r) => {
+        const n = Math.min(this.orders.length, vals.length);
+        for (let i = 0; i < n; i++) {
+          const o = this.orders[i]!;
+          const c = compare(getField(r.data()!, o.field), vals[i]);
+          if (c === 0) continue;
+          return o.dir === "desc" ? c < 0 : c > 0;
+        }
+        return false;
       });
     }
     if (this.limitN !== undefined) results = results.slice(0, this.limitN);

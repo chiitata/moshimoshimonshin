@@ -257,7 +257,8 @@ describe("delivery routes (#17, API-029/030)", () => {
       facilityId: string;
     };
     expect(body.deliveryId).toBe(deliveryId);
-    expect(body.status).toBe("created");
+    // 施設側コピーは作成=配送済み（created→delivered はtx内で完結）
+    expect(body.status).toBe("delivered");
     expect(body.facilityId).toBe(FAC_ID);
   });
 

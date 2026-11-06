@@ -5,6 +5,7 @@ import {
 } from "firebase-admin/firestore";
 import type { Deps } from "../deps.js";
 import type {
+  AuditEventDoc,
   MedicationDoc,
   UploadDoc,
 } from "../domain/firestoreDocs.js";
@@ -19,7 +20,13 @@ import type {
 } from "../domain/types.js";
 import { ApiError } from "../lib/errors.js";
 import { requestHash, runIdempotent } from "../lib/idempotency.js";
-import { audit, auditResourceHash, auditUidHash } from "../lib/audit.js";
+import {
+  audit,
+  auditInTransaction,
+  auditResourceHash,
+  auditUidHash,
+  logAuditEvent,
+} from "../lib/audit.js";
 import { AUDIT_ACTIONS } from "../domain/auditEvents.js";
 import { getDoc } from "../repos/helpers.js";
 import {
@@ -314,19 +321,27 @@ export async function deleteMedication(
   params: { uid: string; medicationId: string; requestId?: string },
 ): Promise<void> {
   const ref = deps.db.doc(`medications/${params.medicationId}`);
-  const snap = await ref.get();
-  const doc = snap.data() as MedicationDoc | undefined;
-  if (!snap.exists || !doc || doc.patientUid !== params.uid) {
-    throw ApiError.notFound("薬剤が見つかりません。");
-  }
-  await ref.delete();
-  await audit(deps, {
-    actorType: "patient",
-    actorUidHash: auditUidHash(deps, params.uid),
-    action: AUDIT_ACTIONS.MEDICATION_DELETED,
-    resourceType: "medications",
-    resourceIdHash: auditResourceHash(deps, params.medicationId),
-    ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
-    outcome: "deleted",
+  const committedAudits: AuditEventDoc[] = [];
+  // 削除と証跡を同一txにし、同時DELETE競合で監査が二重発行されないようにする
+  await deps.db.runTransaction(async (tx) => {
+    committedAudits.length = 0;
+    const snap = await tx.get(ref);
+    const doc = snap.data() as MedicationDoc | undefined;
+    if (!snap.exists || !doc || doc.patientUid !== params.uid) {
+      throw ApiError.notFound("薬剤が見つかりません。");
+    }
+    tx.delete(ref);
+    committedAudits.push(
+      auditInTransaction(tx, deps, {
+        actorType: "patient",
+        actorUidHash: auditUidHash(deps, params.uid),
+        action: AUDIT_ACTIONS.MEDICATION_DELETED,
+        resourceType: "medications",
+        resourceIdHash: auditResourceHash(deps, params.medicationId),
+        ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
+        outcome: "deleted",
+      }),
+    );
   });
+  for (const e of committedAudits) logAuditEvent(deps, e);
 }

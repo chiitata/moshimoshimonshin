@@ -39,6 +39,8 @@ export async function queryDocs<T>(
   conditions: QueryCondition[],
   options?: {
     orderBy?: Array<{ field: string; direction?: "asc" | "desc" }>;
+    /** orderBy フィールドに対応するカーソル値（startAfter）。 */
+    startAfterValues?: unknown[];
     limit?: number;
     collectionGroup?: boolean;
   },
@@ -49,6 +51,9 @@ export async function queryDocs<T>(
   for (const c of conditions) q = q.where(c.field, c.op, c.value);
   for (const o of options?.orderBy ?? []) {
     q = q.orderBy(o.field, o.direction ?? "asc");
+  }
+  if (options?.startAfterValues?.length) {
+    q = q.startAfter(...options.startAfterValues);
   }
   if (options?.limit) q = q.limit(options.limit);
   const snap = await q.get();

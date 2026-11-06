@@ -133,6 +133,66 @@ describe("hospital receive routes (#18, API-031〜033)", () => {
       const body = res.json() as { deliveries: Array<Record<string, unknown>> };
       expect(body.deliveries[0]).not.toHaveProperty("senderUid");
     });
+
+    it("nextCursor で次ページを取得できる", async () => {
+      const { deps, app } = await setup();
+      await seedMembership(deps, STAFF_A, FACILITY_A);
+      const base = Date.parse("2026-01-10T00:00:00Z");
+      for (let i = 0; i < 3; i++) {
+        await seedDelivery(deps, `d-page-${i}`, FACILITY_A, {
+          deliveredAt: Timestamp.fromMillis(base - i * 1000),
+          createdAt: Timestamp.fromMillis(base - i * 1000),
+        });
+      }
+
+      const page1 = await app.inject({
+        method: "GET",
+        url: `/v1/hospitals/${FACILITY_A}/deliveries?limit=2`,
+        headers: authHeader(STAFF_A),
+      });
+      expect(page1.statusCode).toBe(200);
+      const p1 = page1.json() as {
+        deliveries: Array<{ deliveryId: string }>;
+        nextCursor: string | null;
+      };
+      expect(p1.deliveries.map((d) => d.deliveryId)).toEqual([
+        "d-page-0",
+        "d-page-1",
+      ]);
+      expect(p1.nextCursor).toBe("d-page-1");
+
+      const page2 = await app.inject({
+        method: "GET",
+        url: `/v1/hospitals/${FACILITY_A}/deliveries?limit=2&cursor=${p1.nextCursor}`,
+        headers: authHeader(STAFF_A),
+      });
+      expect(page2.statusCode).toBe(200);
+      const p2 = page2.json() as {
+        deliveries: Array<{ deliveryId: string }>;
+        nextCursor: string | null;
+      };
+      expect(p2.deliveries.map((d) => d.deliveryId)).toEqual(["d-page-2"]);
+      expect(p2.nextCursor).toBeNull();
+    });
+
+    it("失効したカーソルは空ページを返す", async () => {
+      const { deps, app } = await setup();
+      await seedMembership(deps, STAFF_A, FACILITY_A);
+      await seedDelivery(deps, "d-any", FACILITY_A);
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/v1/hospitals/${FACILITY_A}/deliveries?cursor=nonexistent`,
+        headers: authHeader(STAFF_A),
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as {
+        deliveries: unknown[];
+        nextCursor: string | null;
+      };
+      expect(body.deliveries).toHaveLength(0);
+      expect(body.nextCursor).toBeNull();
+    });
   });
 
   describe("GET /v1/hospitals/:facilityId/deliveries/:deliveryId", () => {
