@@ -19,7 +19,8 @@ import type {
 } from "../domain/types.js";
 import { ApiError } from "../lib/errors.js";
 import { requestHash, runIdempotent } from "../lib/idempotency.js";
-import { audit, auditUidHash } from "../lib/audit.js";
+import { audit, auditResourceHash, auditUidHash } from "../lib/audit.js";
+import { AUDIT_ACTIONS } from "../domain/auditEvents.js";
 import { getDoc } from "../repos/helpers.js";
 import {
   getMedication,
@@ -211,9 +212,9 @@ export async function createMedication(
   await audit(deps, {
     actorType: "patient",
     actorUidHash: auditUidHash(deps, params.uid),
-    action: "MEDICATION_CREATED",
+    action: AUDIT_ACTIONS.MEDICATION_CREATED,
     resourceType: "medications",
-    resourceIdHash: result.medicationId,
+    resourceIdHash: auditResourceHash(deps, result.medicationId),
     requestId: params.requestId,
     outcome: confirmationStatus,
   });
@@ -239,7 +240,12 @@ export async function listMedications(
 /** API-025 PATCH /medications/{id}。 */
 export async function patchMedication(
   deps: Deps,
-  params: { uid: string; medicationId: string; body: MedicationPatchBody },
+  params: {
+    uid: string;
+    medicationId: string;
+    body: MedicationPatchBody;
+    requestId?: string;
+  },
 ): Promise<MedicationResponse> {
   const ref = deps.db.doc(`medications/${params.medicationId}`);
   const snap = await ref.get();
@@ -272,9 +278,10 @@ export async function patchMedication(
   await audit(deps, {
     actorType: "patient",
     actorUidHash: auditUidHash(deps, params.uid),
-    action: "MEDICATION_UPDATED",
+    action: AUDIT_ACTIONS.MEDICATION_UPDATED,
     resourceType: "medications",
-    resourceIdHash: params.medicationId,
+    resourceIdHash: auditResourceHash(deps, params.medicationId),
+    ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
     outcome: "updated",
   });
   const after = (await ref.get()).data() as MedicationDoc;
@@ -284,7 +291,7 @@ export async function patchMedication(
 /** API-026 DELETE /medications/{id}。物理削除（PHI最小化）。 */
 export async function deleteMedication(
   deps: Deps,
-  params: { uid: string; medicationId: string },
+  params: { uid: string; medicationId: string; requestId?: string },
 ): Promise<void> {
   const ref = deps.db.doc(`medications/${params.medicationId}`);
   const snap = await ref.get();
@@ -296,9 +303,10 @@ export async function deleteMedication(
   await audit(deps, {
     actorType: "patient",
     actorUidHash: auditUidHash(deps, params.uid),
-    action: "MEDICATION_DELETED",
+    action: AUDIT_ACTIONS.MEDICATION_DELETED,
     resourceType: "medications",
-    resourceIdHash: params.medicationId,
+    resourceIdHash: auditResourceHash(deps, params.medicationId),
+    ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
     outcome: "deleted",
   });
 }

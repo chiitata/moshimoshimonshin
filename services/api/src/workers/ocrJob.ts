@@ -9,7 +9,8 @@ import {
   type OcrEngineResult,
 } from "../domain/ocr.js";
 import { countPdfPages } from "../domain/uploads.js";
-import { audit, auditUidHash } from "../lib/audit.js";
+import { audit, auditResourceHash, auditUidHash } from "../lib/audit.js";
+import { AUDIT_ACTIONS } from "../domain/auditEvents.js";
 import { getDoc } from "../repos/helpers.js";
 
 export interface OcrRunResult {
@@ -244,18 +245,18 @@ export class OcrWorker {
     if (result.ok) {
       await audit(this.deps, {
         actorType: "service",
-        action: "OCR_JOB_SUCCEEDED",
+        action: AUDIT_ACTIONS.OCR_JOB_SUCCEEDED,
         resourceType: "ocrJobs",
-        resourceIdHash: jobId,
+        resourceIdHash: auditResourceHash(this.deps, jobId),
         details: { candidateCount: result.candidates.length, attempt },
       });
     } else if (outcome === "failed_terminal") {
       await audit(this.deps, {
         actorType: "service",
         actorUidHash: auditUidHash(this.deps, job.patientUid),
-        action: "OCR_JOB_FAILED",
+        action: AUDIT_ACTIONS.OCR_JOB_FAILED,
         resourceType: "ocrJobs",
-        resourceIdHash: jobId,
+        resourceIdHash: auditResourceHash(this.deps, jobId),
         details: { errorCode: result.code, attempt },
       });
     }

@@ -16,7 +16,8 @@ import {
 } from "../domain/uploads.js";
 import { ApiError, ErrorCodes } from "../lib/errors.js";
 import { requestHash, runIdempotent } from "../lib/idempotency.js";
-import { audit, auditUidHash } from "../lib/audit.js";
+import { audit, auditResourceHash, auditUidHash } from "../lib/audit.js";
+import { AUDIT_ACTIONS } from "../domain/auditEvents.js";
 import { activeUploadsQuery, getUpload } from "../repos/uploads.js";
 import { queryDocs } from "../repos/helpers.js";
 import { latestOcrJobForUpload } from "../repos/ocrJobs.js";
@@ -56,7 +57,12 @@ function timestampToDate(value: unknown): Date | undefined {
  */
 export async function initUpload(
   deps: Deps,
-  params: { uid: string; body: UploadInitBody; idempotencyKey: string },
+  params: {
+    uid: string;
+    body: UploadInitBody;
+    idempotencyKey: string;
+    requestId?: string;
+  },
 ): Promise<InitUploadResult> {
   const { body } = params;
   if (body.bytes > UPLOAD_MAX_BYTES) {
@@ -131,9 +137,10 @@ export async function initUpload(
   await audit(deps, {
     actorType: "patient",
     actorUidHash: auditUidHash(deps, params.uid),
-    action: "UPLOAD_INIT",
+    action: AUDIT_ACTIONS.UPLOAD_INIT,
     resourceType: "uploads",
-    resourceIdHash: result.uploadId,
+    resourceIdHash: auditResourceHash(deps, result.uploadId),
+    ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
     outcome: "created",
   });
 
@@ -327,9 +334,9 @@ export async function completeUpload(
   await audit(deps, {
     actorType: "patient",
     actorUidHash: auditUidHash(deps, params.uid),
-    action: "UPLOAD_COMPLETED",
+    action: AUDIT_ACTIONS.UPLOAD_COMPLETED,
     resourceType: "uploads",
-    resourceIdHash: params.uploadId,
+    resourceIdHash: auditResourceHash(deps, params.uploadId),
     requestId: params.requestId,
     outcome: "uploaded",
   });

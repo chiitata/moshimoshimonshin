@@ -9,7 +9,8 @@ import {
   OVERDUE_ALERT_MS,
   retryDelayMs,
 } from "../domain/deletion.js";
-import { audit, auditUidHash } from "../lib/audit.js";
+import { audit, auditResourceHash, auditUidHash } from "../lib/audit.js";
+import { AUDIT_ACTIONS } from "../domain/auditEvents.js";
 import {
   deleteRecursive,
   deleteWhere,
@@ -130,10 +131,10 @@ export class DeletionWorker {
     });
     await audit(this.deps, {
       actorType: "service",
-      action: "ACCOUNT_PURGED",
+      action: AUDIT_ACTIONS.ACCOUNT_PURGED,
       outcome: "succeeded",
       resourceType: "deletionJobs",
-      resourceIdHash: jobId,
+      resourceIdHash: auditResourceHash(this.deps, jobId),
       actorUidHash: auditUidHash(this.deps, uid),
       details: { attemptCount: job.attemptCount },
     });
@@ -510,10 +511,10 @@ export class DeletionWorker {
     );
     await audit(this.deps, {
       actorType: "service",
-      action: "ACCOUNT_PURGED",
+      action: AUDIT_ACTIONS.ACCOUNT_PURGED,
       outcome: terminal ? "failed_terminal" : "failed_retryable",
       resourceType: "deletionJobs",
-      resourceIdHash: jobId,
+      resourceIdHash: auditResourceHash(this.deps, jobId),
       actorUidHash: auditUidHash(this.deps, job.subjectUid),
       details: { step, errorClass },
     });
@@ -540,10 +541,10 @@ export class DeletionWorker {
     );
     await audit(this.deps, {
       actorType: "service",
-      action: "ACCOUNT_PURGED",
+      action: AUDIT_ACTIONS.ACCOUNT_PURGED,
       outcome: "overdue_alert",
       resourceType: "deletionJobs",
-      resourceIdHash: jobId,
+      resourceIdHash: auditResourceHash(this.deps, jobId),
       actorUidHash: auditUidHash(this.deps, job.subjectUid),
     });
     await this.deps.db.doc(`deletionJobs/${jobId}`).update({

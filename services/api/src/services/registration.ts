@@ -24,6 +24,7 @@ import { hmacParts } from "../lib/hash.js";
 import { getLegalDocuments } from "../repos/legalConfig.js";
 import { registrationOperationRef } from "../repos/operations.js";
 import { audit, auditUidHash } from "../lib/audit.js";
+import { AUDIT_ACTIONS } from "../domain/auditEvents.js";
 import type { Transaction } from "../repos/helpers.js";
 
 export interface RegisterResult {
@@ -99,11 +100,11 @@ export async function registerEmail(
     if (operation.requestHash !== reqHash) {
       await audit(deps, {
         actorType: "service",
-        action: "REGISTRATION_ATTEMPT",
+        action: AUDIT_ACTIONS.REGISTRATION_ATTEMPT,
         outcome: "conflict",
         requestId: params.requestId,
         resourceType: "registrationOperation",
-        resourceIdHash: operationHash.slice(0, 32),
+        resourceIdHash: operationHash,
       });
       throw ApiError.conflict(
         ErrorCodes.REGISTRATION_CONFLICT,
@@ -232,11 +233,11 @@ export async function registerEmail(
     }).catch(() => undefined);
     await audit(deps, {
       actorType: "service",
-      action: "REGISTRATION_ATTEMPT",
+      action: AUDIT_ACTIONS.REGISTRATION_ATTEMPT,
       outcome: "failed",
       requestId: params.requestId,
       resourceType: "registrationOperation",
-      resourceIdHash: operationHash.slice(0, 32),
+      resourceIdHash: operationHash,
       details: { errorClass: errorClass(err) },
     });
     throw new ApiError(
@@ -250,7 +251,7 @@ export async function registerEmail(
   await audit(deps, {
     actorType: "patient",
     actorUidHash: auditUidHash(deps, operation.uid),
-    action: "REGISTRATION_ATTEMPT",
+    action: AUDIT_ACTIONS.REGISTRATION_ATTEMPT,
     outcome: "created",
     requestId: params.requestId,
     resourceType: "registrationOperation",
@@ -345,18 +346,18 @@ async function reconcileEmailConflict(
       });
       await audit(deps, {
         actorType: "service",
-        action: "REGISTRATION_ATTEMPT",
+        action: AUDIT_ACTIONS.REGISTRATION_ATTEMPT,
         outcome: "recovered",
         requestId: params.requestId,
         resourceType: "registrationOperation",
-        resourceIdHash: operationHash.slice(0, 32),
+        resourceIdHash: operationHash,
       });
       return;
     }
   }
   await audit(deps, {
     actorType: "service",
-    action: "REGISTRATION_ATTEMPT",
+    action: AUDIT_ACTIONS.REGISTRATION_ATTEMPT,
     outcome: "conflict",
     requestId: params.requestId,
     resourceType: "registrationOperation",

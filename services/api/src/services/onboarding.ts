@@ -12,7 +12,13 @@ import { validateConsentSubmission } from "../domain/consents.js";
 import { ApiError, ErrorCodes, assertParsed } from "../lib/errors.js";
 import { requestHash, runIdempotent } from "../lib/idempotency.js";
 import { getLegalDocuments } from "../repos/legalConfig.js";
-import { auditInTransaction, auditUidHash } from "../lib/audit.js";
+import {
+  auditInTransaction,
+  auditUidHash,
+  logAuditEvent,
+} from "../lib/audit.js";
+import { AUDIT_ACTIONS } from "../domain/auditEvents.js";
+import type { AuditEventDoc } from "../domain/firestoreDocs.js";
 import type { RegistrationSource } from "../domain/types.js";
 
 export interface OnboardingResult {
@@ -47,6 +53,7 @@ export async function recordOnboardingConsents(
 
   const source = inferRegistrationSource(params.providers);
 
+  const committedAudits: AuditEventDoc[] = [];
   const { result } = await runIdempotent<OnboardingResult>(deps, {
     namespace: "onboarding_consents",
     key: params.idempotencyKey,
@@ -108,19 +115,25 @@ export async function recordOnboardingConsents(
         tx.create(ref, consent as unknown as DocumentData);
       }
 
-      auditInTransaction(tx, deps, {
-        actorType: "patient",
-        actorUidHash: auditUidHash(deps, params.uid),
-        action: "CONSENT_ACCEPTED",
-        resourceType: "legalConsents",
-        requestId: params.requestId,
-        outcome: "recorded",
-        details: { source },
-      });
+      committedAudits.push(
+        auditInTransaction(tx, deps, {
+          actorType: "patient",
+          actorUidHash: auditUidHash(deps, params.uid),
+          action: AUDIT_ACTIONS.CONSENT_ACCEPTED,
+          resourceType: "legalConsents",
+          requestId: params.requestId,
+          outcome: "recorded",
+          details: { source },
+        }),
+      );
 
       return { onboardingState };
     },
   });
+
+  // コミット確定後にシンク転送用ログを出す（冪等リプレイでは execute が
+  // 走らないため二重出力しない）
+  for (const e of committedAudits) logAuditEvent(deps, e);
 
   return result;
 }
