@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { FieldValue } from "firebase-admin/firestore";
-import { ApiError } from "../../src/lib/errors.js";
 import type { FastifyInstance } from "fastify";
 import { makeTestDeps, type TestDeps } from "../helpers/deps.js";
 import {
@@ -186,7 +185,7 @@ describe("POST /v1/facilities/search-nearby", () => {
     });
 
     expect(deps.fakePlaces.calls).toHaveLength(1);
-    const call = deps.fakePlaces.calls[0];
+    const call = deps.fakePlaces.calls[0]!;
     // PlacesSearchParams に symptom/intake/phi フィールドが存在しないことを型で保証
     const keys = Object.keys(call);
     expect(keys).not.toContain("symptom");
