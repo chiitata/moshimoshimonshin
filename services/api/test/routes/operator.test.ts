@@ -4,6 +4,7 @@ import { makeTestDeps, type TestDeps } from "../helpers/deps.js";
 import { authHeader, buildTestApp } from "../helpers/app.js";
 import type { AuditEventDoc, FacilityDoc } from "../../src/domain/firestoreDocs.js";
 import { encodeOpaqueCursor } from "../../src/lib/opaqueCursor.js";
+import { hmacSha256Hex } from "../../src/lib/hash.js";
 
 const OP = "op-admin-1";
 const FAC = "fac-op-1";
@@ -433,15 +434,21 @@ describe("GET /v1/operator/job-failures", () => {
     });
     const j1 = p1.json();
     expect(j1.items).toHaveLength(2);
-    expect(typeof j1.nextCursor).toBe("string");
-    expect(j1.nextCursor).not.toContain(oj("0002"));
+    expect(j1.nextCursor).toMatch(/^[A-Za-z0-9_-]+$/);
     const p2 = await app.inject({
       method: "GET",
       url: `/v1/operator/job-failures?type=ocr&limit=2&cursor=${j1.nextCursor}`,
       headers: authHeader(OP),
     });
-    expect(p2.json().items).toHaveLength(2);
-    expect(p2.json().nextCursor).toBeNull();
+    const j2 = p2.json();
+    expect(j2.items).toHaveLength(2);
+    expect(j2.nextCursor).toBeNull();
+    // 2ページ目は残り2件（updatedAt降順の続き）。レガシーdocは
+    // 同一HMACスキームの擬名IDで返る
+    expect(j2.items.map((i: { jobId: string }) => i.jobId)).toEqual([
+      oj("0001"),
+      `oj_${hmacSha256Hex(deps.config.hmacSecret, "ocr-job:upload-legacy-1")}`,
+    ]);
 
     // 権限とバリデーション
     expect(
@@ -506,6 +513,103 @@ describe("GET /v1/operator/job-failures", () => {
       headers: authHeader(OP),
     });
     expect(cross.json().items).toEqual([]);
+    await app.close();
+  });
+
+  it("カーソル異常系: 改竄・削除済み・ソートキー欠落・別鍵・deletion往復", async () => {
+    const { app, deps } = await setup();
+    await seedFailedJobs(deps);
+
+    // 改竄トークン（文字種は満たすがGCM認証失敗）→ 空ページ
+    const good = encodeOpaqueCursor(
+      deps.config.hmacSecret,
+      `ocrJobs/${oj("0003")}`,
+    );
+    // 末尾はbase64のパディングビットを含むため、中間の1文字を改竄する
+    const mid = Math.floor(good.length / 2);
+    const tampered = `${good.slice(0, mid)}${good[mid] === "A" ? "B" : "A"}${good.slice(mid + 1)}`;
+    const t = await app.inject({
+      method: "GET",
+      url: `/v1/operator/job-failures?type=ocr&cursor=${tampered}`,
+      headers: authHeader(OP),
+    });
+    expect(t.json().items).toEqual([]);
+
+    // 削除済みdoc → 空ページ
+    const gone = encodeOpaqueCursor(
+      deps.config.hmacSecret,
+      "ocrJobs/oj_deleted000",
+    );
+    const g = await app.inject({
+      method: "GET",
+      url: `/v1/operator/job-failures?type=ocr&cursor=${gone}`,
+      headers: authHeader(OP),
+    });
+    expect(g.json().items).toEqual([]);
+
+    // failed だがソートキー欠落のdoc → 空ページ
+    await deps.db.doc("ocrJobs/oj_notsortkey").set({
+      uploadId: "upload-x",
+      patientUid: "u-patient-secret",
+      status: "failed",
+      engine: "dummy",
+      attempt: 1,
+      errorCode: "image_unclear",
+      candidates: [],
+      dispatchState: "enqueued",
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    const noKey = encodeOpaqueCursor(
+      deps.config.hmacSecret,
+      "ocrJobs/oj_notsortkey",
+    );
+    const k = await app.inject({
+      method: "GET",
+      url: `/v1/operator/job-failures?type=ocr&cursor=${noKey}`,
+      headers: authHeader(OP),
+    });
+    expect(k.json().items).toEqual([]);
+
+    // 別鍵で暗号化 → 復号失敗で空ページ
+    const wrongKey = encodeOpaqueCursor(
+      "different-secret",
+      `ocrJobs/${oj("0003")}`,
+    );
+    const w = await app.inject({
+      method: "GET",
+      url: `/v1/operator/job-failures?type=ocr&cursor=${wrongKey}`,
+      headers: authHeader(OP),
+    });
+    expect(w.json().items).toEqual([]);
+
+    // deletion のカーソル往復（ソートキー: requestedAt）
+    await deps.db.doc("deletionJobs/job-del-2").set({
+      subjectUid: "u-subject-secret",
+      requestedAt: Timestamp.fromMillis(4000),
+      status: "failed",
+      attemptCount: 1,
+      lastErrorCode: "firestore_delete_failed",
+      lastStartedAt: Timestamp.fromMillis(4100),
+    });
+    const d1 = await app.inject({
+      method: "GET",
+      url: "/v1/operator/job-failures?type=deletion&limit=1",
+      headers: authHeader(OP),
+    });
+    const dj1 = d1.json();
+    expect(dj1.items).toHaveLength(1);
+    expect(dj1.items[0].jobId).toBe("job-del-1");
+    expect(dj1.nextCursor).toMatch(/^[A-Za-z0-9_-]+$/);
+    const d2 = await app.inject({
+      method: "GET",
+      url: `/v1/operator/job-failures?type=deletion&limit=1&cursor=${dj1.nextCursor}`,
+      headers: authHeader(OP),
+    });
+    const dj2 = d2.json();
+    expect(dj2.items.map((i: { jobId: string }) => i.jobId)).toEqual([
+      "job-del-2",
+    ]);
+    expect(dj2.nextCursor).toBeNull();
     await app.close();
   });
 });

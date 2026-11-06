@@ -60,13 +60,16 @@ async function resolveCursor(
   deps: Deps,
   token: string,
   collection: string,
-  requireFailed: (data: Record<string, unknown>) => boolean,
+  isValidCursorDoc: (data: Record<string, unknown>) => boolean,
 ): Promise<DocumentSnapshot | null> {
   const path = decodeOpaqueCursor(deps.config.hmacSecret, token);
-  if (path === null || !path.startsWith(`${collection}/`)) return null;
+  // "collection/docId" のみ許可（多セグメント・空セグメントを排除）
+  if (path === null || !new RegExp(`^${collection}/[^/]+$`).test(path)) {
+    return null;
+  }
   const snap = await deps.db.doc(path).get();
   const data = snap.data() as Record<string, unknown> | undefined;
-  if (!snap.exists || !data || !requireFailed(data)) return null;
+  if (!snap.exists || !data || !isValidCursorDoc(data)) return null;
   return snap;
 }
 
@@ -109,7 +112,7 @@ export async function listFailedOcrJobs(
       rows.length > opts.limit
         ? encodeOpaqueCursor(
             deps.config.hmacSecret,
-            `ocrJobs/${rows[opts.limit - 1]!.id}`,
+            rows[opts.limit - 1]!.path,
           )
         : null,
   };
@@ -154,7 +157,7 @@ export async function listFailedDeletionJobs(
       rows.length > opts.limit
         ? encodeOpaqueCursor(
             deps.config.hmacSecret,
-            `deletionJobs/${rows[opts.limit - 1]!.id}`,
+            rows[opts.limit - 1]!.path,
           )
         : null,
   };
