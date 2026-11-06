@@ -100,7 +100,8 @@ export function registerHospitalRoutes(app: FastifyInstance, deps: Deps): void {
       schema: {
         params: facilityParams,
         querystring: z.object({
-          cursor: z.string().optional(),
+          // deliveryId は dlv_<base36><base64url> 形式のみ許可し doc パスを安全にする
+          cursor: z.string().regex(/^[A-Za-z0-9_-]+$/).max(200).optional(),
           limit: z.coerce.number().int().min(1).max(50).optional(),
         }),
         response: {

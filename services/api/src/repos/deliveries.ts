@@ -1,4 +1,8 @@
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import {
+  FieldValue,
+  Timestamp,
+  type DocumentSnapshot,
+} from "firebase-admin/firestore";
 import type { DeliveryDoc, FacilityDoc } from "../domain/firestoreDocs.js";
 import { getDoc, queryDocs } from "./helpers.js";
 import type { FirestoreLike } from "./helpers.js";
@@ -67,15 +71,23 @@ export async function listDeliveriesByFacility(
 ): Promise<DeliveryListResult> {
   const pageSize = opts?.limit ?? 20;
 
-  // カーソルは直前ページ末尾の deliveryId。そのソート値で startAfter する。
+  // カーソルは直前ページ末尾の deliveryId。そのスナップショットで startAfter し、
+  // ソート値が同一のドキュメント間でも一意に分割できるようにする。
   // 失効・他院のカーソルは空ページを返し、ページネーションを安全に打ち切る。
-  let startAfterValues: unknown[] | undefined;
+  let startAfterDoc: DocumentSnapshot | undefined;
   if (opts?.cursor) {
-    const cur = await getDoc<DeliveryDoc>(db, `deliveries/${opts.cursor}`);
-    if (!cur.exists || !cur.data || cur.data.facilityId !== facilityId) {
+    const curSnap = await db.doc(`deliveries/${opts.cursor}`).get();
+    const cur = curSnap.data() as DeliveryDoc | undefined;
+    if (
+      !curSnap.exists ||
+      !cur ||
+      cur.facilityId !== facilityId ||
+      cur.deliveredAt == null ||
+      cur.createdAt == null
+    ) {
       return { items: [], nextCursor: null };
     }
-    startAfterValues = [cur.data.deliveredAt, cur.data.createdAt];
+    startAfterDoc = curSnap;
   }
 
   const rows = await queryDocs<DeliveryDoc>(
@@ -87,7 +99,7 @@ export async function listDeliveriesByFacility(
         { field: "deliveredAt", direction: "desc" },
         { field: "createdAt", direction: "desc" },
       ],
-      ...(startAfterValues ? { startAfterValues } : {}),
+      ...(startAfterDoc ? { startAfterDoc } : {}),
       limit: pageSize + 1,
     },
   );

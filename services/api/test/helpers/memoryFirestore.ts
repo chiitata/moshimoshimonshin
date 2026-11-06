@@ -177,6 +177,18 @@ class MemQuery {
     return this;
   }
 
+  /** ソート順でカーソル値 vals より「後」にあるか。 */
+  private sortsAfterValues(snap: MemDocSnap, vals: unknown[]): boolean {
+    const n = Math.min(this.orders.length, vals.length);
+    for (let i = 0; i < n; i++) {
+      const o = this.orders[i]!;
+      const c = compare(getField(snap.data()!, o.field), vals[i]);
+      if (c === 0) continue;
+      return o.dir === "desc" ? c < 0 : c > 0;
+    }
+    return false;
+  }
+
   async get(): Promise<MemQuerySnap> {
     let results: MemDocSnap[] = [];
     for (const path of this.paths()) {
@@ -187,28 +199,50 @@ class MemQuery {
         results.push(new MemDocSnap(true, data, id, new MemDocRef(this.store, path)));
       }
     }
-    for (const o of this.orders) {
-      results.sort((a, b) => {
+    // 実Firestore同様、orderByフィールドを持たないドキュメントは除外する
+    if (this.orders.length) {
+      results = results.filter((r) =>
+        this.orders.every((o) => getField(r.data()!, o.field) !== undefined),
+      );
+    }
+    // 複合orderBy: 先頭キーから順に比較（後ソートが先ソートを潰さないよう統合比較）
+    results.sort((a, b) => {
+      for (const o of this.orders) {
         const c = compare(
           getField(a.data()!, o.field),
           getField(b.data()!, o.field),
         );
-        return o.dir === "desc" ? -c : c;
-      });
-    }
-    // startAfter: ソート順でカーソル値より「後」にあるものだけ残す
-    if (this.afterValues?.length && this.orders.length) {
-      const vals = this.afterValues;
-      results = results.filter((r) => {
-        const n = Math.min(this.orders.length, vals.length);
-        for (let i = 0; i < n; i++) {
-          const o = this.orders[i]!;
-          const c = compare(getField(r.data()!, o.field), vals[i]);
-          if (c === 0) continue;
-          return o.dir === "desc" ? c < 0 : c > 0;
+        if (c !== 0) return o.dir === "desc" ? -c : c;
+      }
+      return 0;
+    });
+    // startAfter: DocumentSnapshot カーソルは結果中の位置で分割、
+    // 値カーソルはソート値で位置決めする
+    if (this.afterValues?.length) {
+      const first = this.afterValues[0] as
+        | { ref?: { path?: string }; data?: () => Data | undefined }
+        | undefined;
+      const isSnapshot =
+        this.afterValues.length === 1 &&
+        !!first &&
+        typeof first === "object" &&
+        typeof first.ref?.path === "string" &&
+        typeof first.data === "function";
+      if (isSnapshot) {
+        const idx = results.findIndex((r) => r.ref.path === first.ref!.path);
+        if (idx >= 0) {
+          results = results.slice(idx + 1);
+        } else {
+          const snapData = first.data!();
+          if (snapData) {
+            const vals = this.orders.map((o) => getField(snapData, o.field));
+            results = results.filter((r) => this.sortsAfterValues(r, vals));
+          }
         }
-        return false;
-      });
+      } else {
+        const vals = this.afterValues;
+        results = results.filter((r) => this.sortsAfterValues(r, vals));
+      }
     }
     if (this.limitN !== undefined) results = results.slice(0, this.limitN);
     return new MemQuerySnap(results);
