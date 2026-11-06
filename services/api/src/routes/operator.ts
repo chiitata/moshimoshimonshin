@@ -14,7 +14,7 @@ import {
 import { errors } from "./apiDocs.js";
 
 const facilityParams = z.object({
-  facilityId: z.string().min(1).max(200),
+  facilityId: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/),
 });
 
 /** FR-H04: 4検証項目は承認に全て必須。 */

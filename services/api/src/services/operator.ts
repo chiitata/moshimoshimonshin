@@ -1,4 +1,4 @@
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import type { Deps } from "../deps.js";
 import { AUDIT_ACTIONS } from "../domain/auditEvents.js";
 import {
@@ -62,12 +62,12 @@ export async function verifyFacility(
         "この施設は既に承認済みです。",
       );
     }
-    const now = FieldValue.serverTimestamp();
+    const verifiedAt = Timestamp.fromDate(deps.clock.now());
     await tx.update(ref, {
       verificationStatus: "verified",
-      verifiedAt: now,
+      verifiedAt,
       verificationRecordId: params.verificationRecordId,
-      updatedAt: now,
+      updatedAt: FieldValue.serverTimestamp(),
     });
     const recRef = deps.db.collection("facilityVerificationRecords").doc();
     await tx.create(recRef, {
@@ -76,7 +76,7 @@ export async function verifyFacility(
       checks: params.checks,
       verificationRecordId: params.verificationRecordId,
       note: params.note ?? null,
-      createdAt: now,
+      createdAt: FieldValue.serverTimestamp(),
     });
     committedAudits.push(
       auditInTransaction(tx, deps, {

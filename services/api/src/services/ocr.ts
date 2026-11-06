@@ -1,6 +1,7 @@
 import { FieldValue, Timestamp, type DocumentData } from "firebase-admin/firestore";
 import type { Deps } from "../deps.js";
 import type { OcrJobDoc } from "../domain/firestoreDocs.js";
+import { hmacSha256Hex } from "../lib/hash.js";
 import { latestOcrJobForUpload, ocrJobRef } from "../repos/ocrJobs.js";
 
 /**
@@ -28,10 +29,14 @@ export async function createOcrJobForUpload(
     return { jobId: existing.id, created: false };
   }
 
-  // ジョブIDは uploadId をそのまま使い create-if-absent で予約する。
+  // ジョブIDは uploadId の HMAC 擬名で create-if-absent 予約する。
+  // uploadId を doc ID にすると運営の失敗ジョブ一覧（FR-O04）で
+  // 個人紐付け識別子が露出するため、決定性は保ちつつ不可逆にする。
   // 同時 complete 競合では一方のみが作成に成功し、他方は既存ジョブを再利用する
   // （ランダムIDだと二重ジョブが並走して処理状態の表示が不安定になる）。
-  const ref = deps.db.doc(`ocrJobs/${params.uploadId}`);
+  const ref = deps.db.doc(
+    `ocrJobs/oj_${hmacSha256Hex(deps.config.hmacSecret, `ocr-job:${params.uploadId}`)}`,
+  );
   const doc: OcrJobDoc = {
     uploadId: params.uploadId,
     patientUid: params.patientUid,

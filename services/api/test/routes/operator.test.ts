@@ -418,6 +418,14 @@ describe("GET /v1/operator/job-failures", () => {
         await app.inject({
           method: "GET",
           url: "/v1/operator/job-failures?type=ocr",
+        })
+      ).statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/v1/operator/job-failures?type=ocr",
           headers: authHeader("not-operator"),
         })
       ).statusCode,

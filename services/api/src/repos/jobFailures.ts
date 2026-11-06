@@ -39,7 +39,7 @@ async function resolveCursor(
   db: FirestoreLike,
   path: string,
   requireFailed: (data: Record<string, unknown>) => boolean,
-): Promise<DocumentSnapshot | undefined | null> {
+): Promise<DocumentSnapshot | null> {
   const snap = await db.doc(path).get();
   const data = snap.data() as Record<string, unknown> | undefined;
   if (!snap.exists || !data || !requireFailed(data)) return null;
