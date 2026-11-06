@@ -59,7 +59,7 @@ async function seedDelivery(
     questionnaireId: "qn-1",
     questionnaireRevisionId: "rev-1",
     consentId: "consent-1",
-    shareScope: { name: true, medications: false },
+    shareScope: { includeProfile: true, includeConfirmedMedications: false, includePrescriptionImages: false },
     patientIdentitySnapshot: { familyName: "山田", givenName: "太郎" },
     questionnaireSnapshot: { chiefComplaint: "頭痛" },
     snapshotSha256: "abc123",
