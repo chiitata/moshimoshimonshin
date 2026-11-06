@@ -123,8 +123,9 @@ export async function notifyPatient(
 
       if (result.code === "disabled") {
         // エミュレータ等で送信自体が無効。失敗でも成功でもないため
-        // 監査・無効化は行わない。
-        continue;
+        // 監査・無効化は行わない。ゲートウェイはプロセスで一様なので
+        // 残りのデバイスへの試行もスキップする。
+        return;
       }
       if (result.code === "unregistered" || result.code === "invalid_token") {
         // 送信試行時点の lastSeenAt を渡し、その間の再登録を無効化で

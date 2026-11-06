@@ -4,7 +4,6 @@ import type {
   PushGateway,
   PushSendResult,
 } from "./deps.js";
-import type { AppConfig } from "./config.js";
 import type { FastifyBaseLogger } from "fastify";
 
 /**
@@ -67,15 +66,13 @@ export class AdminPushGateway implements PushGateway {
  * NOTIFICATION_FAILED 監査も記録しない（呼び出し側で除外）。
  */
 export class DisabledPushGateway implements PushGateway {
-  constructor(
-    private readonly config: AppConfig,
-    private readonly logger: FastifyBaseLogger,
-  ) {}
+  constructor(private readonly logger: FastifyBaseLogger) {}
 
   async sendToDevice(params: {
     token: string;
     title: string;
     body: string;
+    data?: Record<string, string>;
   }): Promise<PushSendResult> {
     this.logger.debug(
       { tokenLen: params.token.length },

@@ -74,10 +74,10 @@ async function main(): Promise<void> {
       config.googlePlacesApiKey !== undefined && config.googlePlacesApiKey !== ""
         ? new GooglePlacesGateway(config.googlePlacesApiKey)
         : new DummyPlacesGateway(),
-    // FCMはエミュレートされない。開発/エミュレータは送信無効（unavailable で
-    // トークンを失効させない）、本番のみ Admin SDK で送信する。
+    // FCMはエミュレートされない。開発/エミュレータは送信無効（disabled で
+    // トークン保持・監査記録なし）、本番のみ Admin SDK で送信する。
     pushGateway: config.emulator
-      ? new DisabledPushGateway(config, logger)
+      ? new DisabledPushGateway(logger)
       : new AdminPushGateway(getMessaging(firebase.app)),
     rateLimiter: new RateLimiter(systemClock),
     clock: systemClock,
