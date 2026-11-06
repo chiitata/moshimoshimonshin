@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:patient/demo_registration_transport.dart';
+import 'package:patient/firebase_bootstrap.dart' show isDemoEmulatorHost;
 
 class TestClient extends http.BaseClient {
   TestClient(this.handler);
@@ -12,6 +14,26 @@ class TestClient extends http.BaseClient {
   Future<http.StreamedResponse> send(http.BaseRequest request) =>
       handler(request);
 }
+
+/// Origins that must never be accepted, whatever the platform reports.
+const rejectedOrigins = [
+  'https://localhost:8080',
+  'http://localhost',
+  'http://localhost:8081',
+  'http://localhost:8080/',
+  'http://localhost:8080/v1/auth/register',
+  'http://localhost:8080?x=1',
+  'http://localhost:8080#x',
+  'http://localhost:8080@evil.example:8080',
+  'http://localhost.evil:8080',
+  'http://127.0.0.2:8080',
+  'http://[::1]:8080',
+  'http://10.0.2.2',
+  'http://10.0.2.2:8081',
+  'http://10.0.2.2:8080/',
+  'http://10.0.2.2.evil.example:8080',
+  'http://10.0.2.3:8080',
+];
 
 void main() {
   const headers = {
@@ -24,6 +46,10 @@ void main() {
   };
 
   test('posts JSON and required headers to the fixed local endpoint', () async {
+    // The alias origin is Android-only, so pin the platform instead of
+    // relying on the platform of the machine that runs the test.
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
     for (final host in ['localhost', '127.0.0.1', '10.0.2.2']) {
       final client = TestClient((request) async {
         expect(request.method, 'POST');
@@ -54,24 +80,123 @@ void main() {
 
   test('rejects anything other than an explicitly allowed origin', () {
     final client = TestClient((_) => throw StateError('must not send'));
-    for (final url in [
-      'https://localhost:8080',
-      'http://localhost',
-      'http://localhost:8081',
-      'http://localhost:8080/',
-      'http://localhost:8080/v1/auth/register',
-      'http://localhost:8080?x=1',
-      'http://localhost:8080#x',
-      'http://localhost:8080@evil.example:8080',
-      'http://localhost.evil:8080',
-      'http://127.0.0.2:8080',
-      'http://[::1]:8080',
-    ]) {
+    for (final origin in rejectedOrigins) {
       expect(
-        () => DemoRegistrationTransport(baseUrl: url, client: client),
+        () => DemoRegistrationTransport(baseUrl: origin, client: client),
         throwsArgumentError,
+        reason: origin,
       );
     }
+  });
+
+  group('allowsDemoApiOrigin', () {
+    test('accepts loopback origins in both platform modes', () {
+      for (final origin in ['http://localhost:8080', 'http://127.0.0.1:8080']) {
+        expect(
+          allowsDemoApiOrigin(origin, androidHostAliasAllowed: false),
+          isTrue,
+          reason: origin,
+        );
+        expect(
+          allowsDemoApiOrigin(origin, androidHostAliasAllowed: true),
+          isTrue,
+          reason: origin,
+        );
+      }
+    });
+
+    test('accepts the Android alias origin only when it is allowed', () {
+      const origin = 'http://10.0.2.2:8080';
+      expect(
+        allowsDemoApiOrigin(origin, androidHostAliasAllowed: true),
+        isTrue,
+      );
+      expect(
+        allowsDemoApiOrigin(origin, androidHostAliasAllowed: false),
+        isFalse,
+      );
+    });
+
+    test('rejects every other origin in both platform modes', () {
+      for (final origin in rejectedOrigins) {
+        expect(
+          allowsDemoApiOrigin(origin, androidHostAliasAllowed: false),
+          isFalse,
+          reason: origin,
+        );
+        expect(
+          allowsDemoApiOrigin(origin, androidHostAliasAllowed: true),
+          isFalse,
+          reason: origin,
+        );
+      }
+    });
+
+    test('stays aligned with the Firebase emulator host guard', () {
+      const originByHost = {
+        'http://localhost:8080': 'localhost',
+        'http://127.0.0.1:8080': '127.0.0.1',
+        'http://10.0.2.2:8080': '10.0.2.2',
+      };
+      for (final entry in originByHost.entries) {
+        for (final allowed in [true, false]) {
+          expect(
+            allowsDemoApiOrigin(entry.key, androidHostAliasAllowed: allowed),
+            isDemoEmulatorHost(entry.value, androidHostAliasAllowed: allowed),
+            reason: '${entry.key} (androidHostAliasAllowed: $allowed)',
+          );
+        }
+      }
+    });
+  });
+
+  group('default constructor platform gate', () {
+    test('rejects the alias origin and keeps loopback off Android', () {
+      // kIsWeb is a compile-time constant, so the web build cannot be
+      // simulated in a VM test; only the platform half is covered here.
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final client = TestClient((_) => throw StateError('must not send'));
+      const nonAndroid = [
+        TargetPlatform.iOS,
+        TargetPlatform.macOS,
+        TargetPlatform.linux,
+        TargetPlatform.windows,
+        TargetPlatform.fuchsia,
+      ];
+      for (final platform in nonAndroid) {
+        debugDefaultTargetPlatformOverride = platform;
+        expect(
+          () => DemoRegistrationTransport(
+            baseUrl: 'http://10.0.2.2:8080',
+            client: client,
+          ),
+          throwsArgumentError,
+          reason: '$platform',
+        );
+        for (final origin in [
+          'http://localhost:8080',
+          'http://127.0.0.1:8080',
+        ]) {
+          expect(
+            () => DemoRegistrationTransport(baseUrl: origin, client: client),
+            returnsNormally,
+            reason: '$platform $origin',
+          );
+        }
+      }
+    });
+
+    test('accepts the alias origin on Android', () {
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      expect(
+        () => DemoRegistrationTransport(
+          baseUrl: 'http://10.0.2.2:8080',
+          client: TestClient((_) => throw StateError('must not send')),
+        ),
+        returnsNormally,
+      );
+    });
   });
 
   test('rejects redirect responses without following them', () async {

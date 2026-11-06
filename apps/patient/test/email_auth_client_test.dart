@@ -55,13 +55,30 @@ void main() {
   Future<void> register({
     Map<String, ConsentSelection> selections = consents,
     String key = 'test-key',
+    String email = 'person@example.invalid',
+    String password = 'example123',
+    String locale = 'ja-JP',
   }) => client.register(
-    email: 'person@example.invalid',
-    password: 'example123',
+    email: email,
+    password: password,
     consents: selections,
     idempotencyKey: key,
     appCheckToken: 'test-token',
+    locale: locale,
   );
+
+  Future<void> expectInvalidInput(Future<void> future) async {
+    await expectLater(
+      future,
+      throwsA(
+        isA<EmailAuthException>().having(
+          (e) => e.reason,
+          'reason',
+          EmailAuthFailure.invalidInput,
+        ),
+      ),
+    );
+  }
 
   test('sends API contract without automatically signing in', () async {
     await register();
@@ -174,5 +191,58 @@ void main() {
         ),
       ),
     );
+  });
+
+  group('registration input limits mirror the API schema', () {
+    test('rejects oversized or truncated fields without sending', () async {
+      final tooLongEmail = '${'a' * 249}@example.invalid'; // 265 > 254
+      await expectInvalidInput(register(email: tooLongEmail));
+      await expectInvalidInput(register(email: '   '));
+      await expectInvalidInput(register(password: 'abc1234')); // 7 < 8
+      await expectInvalidInput(
+        register(password: 'a1${'b' * 128}'), // 130 > 128
+      );
+      await expectInvalidInput(register(locale: 'a')); // 1 < 2
+      await expectInvalidInput(register(locale: 'a' * 21)); // 21 > 20
+      await expectInvalidInput(
+        register(
+          selections: {
+            ...consents,
+            'terms_of_service': ConsentSelection(
+              accepted: true,
+              documentVersion: 'v' * 101,
+            ),
+          },
+        ),
+      );
+      await expectInvalidInput(
+        register(
+          selections: {
+            ...consents,
+            'terms_of_service': const ConsentSelection(
+              accepted: true,
+              documentVersion: '',
+            ),
+          },
+        ),
+      );
+      await expectInvalidInput(
+        register(
+          selections: {...consents, 'unknown_type': accepted},
+        ),
+      );
+      expect(transport.calls, 0);
+    });
+
+    test('accepts values at the API schema boundaries', () async {
+      await register(
+        email: '${'a' * (254 - '@example.invalid'.length)}@example.invalid',
+      );
+      await register(password: 'a1${'b' * 6}'); // exactly 8
+      await register(password: 'a1${'b' * 126}'); // exactly 128
+      await register(locale: 'ab'); // exactly 2
+      await register(locale: 'a' * 20); // exactly 20
+      expect(transport.calls, 5);
+    });
   });
 }

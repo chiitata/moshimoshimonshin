@@ -1,9 +1,31 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'email_auth_client.dart';
+import 'firebase_bootstrap.dart' show allowsAndroidHostAlias;
+
+/// Whether [baseUrl] may be used as the local demo API origin.
+///
+/// Every registration sends credentials to this origin, so only the explicit
+/// local origins are accepted and matching is exact and case-sensitive:
+/// scheme, port, path, query, fragment, userinfo and lookalike hosts fail
+/// closed. `http://10.0.2.2:8080` is the Android emulator's alias for the
+/// host machine and is only accepted when [androidHostAliasAllowed] is true,
+/// which is the same rule as the Firebase host guard in
+/// `firebase_bootstrap.dart`. The flag is supplied by the caller so the
+/// platform rule stays injectable and testable without a device.
+@visibleForTesting
+bool allowsDemoApiOrigin(
+  String baseUrl, {
+  required bool androidHostAliasAllowed,
+}) {
+  const loopbackOrigins = {'http://localhost:8080', 'http://127.0.0.1:8080'};
+  if (loopbackOrigins.contains(baseUrl)) return true;
+  return androidHostAliasAllowed && baseUrl == 'http://10.0.2.2:8080';
+}
 
 /// Local demo only. The caller owns and closes [client].
 class DemoRegistrationTransport implements RegistrationTransport {
@@ -21,12 +43,12 @@ class DemoRegistrationTransport implements RegistrationTransport {
   static const int _maxResponseBytes = 64 * 1024;
 
   static Uri _registrationUrl(String baseUrl) {
-    const allowed = {
-      'http://localhost:8080',
-      'http://127.0.0.1:8080',
-      'http://10.0.2.2:8080',
-    };
-    if (!allowed.contains(baseUrl)) {
+    // The platform flag comes from the same getter the Firebase host guard
+    // uses, so both guards accept 10.0.2.2 only on a non-web Android build.
+    if (!allowsDemoApiOrigin(
+      baseUrl,
+      androidHostAliasAllowed: allowsAndroidHostAlias,
+    )) {
       throw ArgumentError('Only explicit local demo API origins are allowed');
     }
     return Uri.parse('$baseUrl/v1/auth/register');

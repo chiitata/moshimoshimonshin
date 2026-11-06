@@ -25,7 +25,9 @@ class DemoEmailSignIn implements EmailSignIn {
     FirebaseApp app,
     EmulatorConfig config,
   ) async {
-    config.validate();
+    // EmulatorConfig.validate is the single host guard: it rejects anything
+    // but loopback (plus the Android emulator alias) before Firebase is used.
+    config.validate(androidHostAliasAllowed: allowsAndroidHostAlias);
     if (app.options.projectId != config.projectId) {
       throw StateError(
         'Firebase project does not match the demo configuration.',
@@ -103,8 +105,16 @@ class EmailAuthClient {
     String? appCheckToken,
     String locale = 'ja-JP',
   }) async {
+    // Field limits mirror the API's registerBodySchema (email max 254,
+    // password 8-128, locale 2-20 after trim) so obviously oversized input
+    // fails before the network. Format rules (email shape, password
+    // composition) stay server-side to avoid drifting from the schema.
     if (email.trim().isEmpty ||
-        password.isEmpty ||
+        email.trim().length > 254 ||
+        password.length < 8 ||
+        password.length > 128 ||
+        locale.trim().length < 2 ||
+        locale.trim().length > 20 ||
         idempotencyKey.isEmpty ||
         idempotencyKey.length > 200 ||
         RegExp(r'\s').hasMatch(idempotencyKey) ||
