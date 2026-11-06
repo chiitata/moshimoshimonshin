@@ -74,7 +74,9 @@ export async function enforceAccess(
     // （Bearer 未提示は雑音として記録しない）。UIDは検証不能なため省略。
     // 未認証段階のためレート制御前に書き込まれる点を踏まえ、監査書込自体を
     // IP単位で制限し、トークンSpamによる書込コスト増幅を抑止する
-    // （制限超過時は401応答のみで監査は落とす）
+    // （制限超過時は401応答のみで監査は落とす）。
+    // req.ip は trustProxy 設定次第ではプロキシ共有IPとなるため、
+    // その場合は全体バケットとして上限のみ機能する
     let throttled = false;
     try {
       deps.rateLimiter.consume(

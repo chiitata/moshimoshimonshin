@@ -406,12 +406,16 @@ async function reserveOperation(
     } else {
       await ref.create(doc as unknown as DocumentData);
     }
-  } catch {
+  } catch (writeErr) {
     // 同時予約の競合: 既存台帳を読み直して処理を再開する。
+    // 既存docが無い場合は一過性エラー等の書込失敗なので原因をそのまま投げる
+    // （競合でもないのに conflict 監査を残さない）
     const existing = await ref.get();
     if (existing.exists) {
       const data = existing.data() as RegistrationOperationDoc;
       if (data.requestHash === reqHash) return data;
+    } else {
+      throw writeErr;
     }
     await audit(deps, {
       actorType: "service",
