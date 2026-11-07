@@ -182,6 +182,8 @@ class _ResultCard extends StatelessWidget {
               const Text('詳細（P-031）はこのデモでは未接続です。'),
               Semantics(
                 button: true,
+                enabled: false,
+                excludeSemantics: true,
                 label: '${result.name}を選ぶ',
                 child: const ElevatedButton(
                   onPressed: null,
