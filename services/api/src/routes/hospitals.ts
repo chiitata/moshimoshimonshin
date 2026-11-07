@@ -29,7 +29,6 @@ const HOSPITAL_ROLES = [
 
 const timestampOrNull = z
   .union([z.string(), z.null()])
-  .optional()
   .describe("ISO8601 UTC or null");
 
 const deliveryListItemSchema = z.object({
@@ -108,7 +107,7 @@ export function registerHospitalRoutes(app: FastifyInstance, deps: Deps): void {
             .enum(["created", "delivered", "acknowledged", "failed", "revoked"])
             .optional(),
           // 患者表示名の前方一致。自院スコープ内でのみ有効（検索制限 FR-H09）
-          q: z.string().min(1).max(100).optional(),
+          q: z.string().trim().min(1).max(100).optional(),
         }),
         response: {
           200: deliveryListResponseSchema,
