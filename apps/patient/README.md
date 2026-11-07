@@ -57,3 +57,39 @@ flutter run -d web-server --web-hostname=localhost --web-port=5056 -t lib/demo_a
 ```
 
 Passkey は審査承認まで既定で非表示です。表示状態だけを確認する場合は、承認済みのレビュー環境に限り `--dart-define=PASSKEY_AUTH_ENABLED=true` を追加します。このフラグは公開承認を意味しません。
+
+### 架空の問診デモ
+
+架空の患者・施設データだけを使う問診フローのデモ手順は [FICTIONAL_DEMO.md](FICTIONAL_DEMO.md) を参照してください。Flutter SDK のみで起動でき、Docker・Firebase Emulator・Node API は不要です。
+
+## 薬の一覧プレビュー
+
+薬剤一覧（P-020）の見た目を単独で確認できます。Flutter SDK を用意し、`apps/patient` で次を実行して http://localhost:5053 を開きます。確認後は Ctrl+C で停止します。現在・過去・不明の薬剤を、服薬状況・登録元・確認日とともに表示します。このプレビューは API に接続せず、編集・削除はメモリ上のみ、追加（P-021 処方箋撮影）は未接続です。実患者情報は入力しないでください。
+
+```sh
+flutter run -d web-server --web-hostname=localhost --web-port=5053 -t lib/demo_medication_list_preview.dart
+```
+
+## 薬の候補確認プレビュー
+
+OCR 候補の人手確認（P-023）の見た目を単独で確認できます。Flutter SDK を用意し、`apps/patient` で次を実行して http://localhost:5054 を開きます。確認後は Ctrl+C で停止します。候補の名前・容量・用法・数量・処方日を確認・編集でき、全件を確認するまで「確定」はできません（自動確定しません）。このプレビューは API に接続せず、写真参照・確定（medications API）は未接続です。実患者情報は入力しないでください。
+
+```sh
+flutter run -d web-server --web-hostname=localhost --web-port=5054 -t lib/demo_ocr_candidate_preview.dart
+```
+
+## 病院検索プレビュー
+
+病院検索（P-030）の見た目を単独で確認できます。Flutter SDK を用意し、`apps/patient` で次を実行して http://localhost:5055 を開きます。確認後は Ctrl+C で停止します。位置情報は取得前に都度同意を求める前提で、許可しない場合は住所・郵便番号の手入力で続けられます。参加施設には「このアプリで問診を受け取れる」旨と運営確認日を表示し、非参加施設は「場所の案内のみ（送信不可）」とします。このプレビューは位置情報取得・検索 API に接続せず、施設選択（P-031）も未接続です。実在する施設の情報は入力しないでください。
+
+```sh
+flutter run -d web-server --web-hostname=localhost --web-port=5055 -t lib/demo_hospital_search_preview.dart
+```
+
+## 病院詳細プレビュー
+
+病院詳細（P-031）の見た目を単独で確認できます。Flutter SDK を用意し、`apps/patient` で次を実行して http://localhost:5057 を開きます。確認後は Ctrl+C で停止します。名称・所在地・参加状況・送信可否を表示し、送信できるのは参加施設のみ（非参加施設は「場所の案内のみ（送信不可）」）です。地図サービス由来の情報には帰属表示を添えます。このプレビューは送信 API に接続せず、送信（P-032）も未接続です。実在する施設の情報は入力しないでください。
+
+```sh
+flutter run -d web-server --web-hostname=localhost --web-port=5057 -t lib/demo_hospital_detail_preview.dart
+```
