@@ -230,6 +230,7 @@ logs-watch: ## ファイル監視のログを表示
 ##@ その他
 
 test-firebase-rules: ## Security Rules 単体テスト（compose のエミュレータ起動中に実行）
+	@[ -d firebase/tests/node_modules ] || npm --prefix firebase/tests ci
 	npm --prefix firebase/tests run test:compose
 
 install-templates: ## .github/template/ をGitHubの正式パスへコピー（PR/Issueテンプレ有効化）
