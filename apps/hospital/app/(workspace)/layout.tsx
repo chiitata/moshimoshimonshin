@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { readSession, sessionApiFetch } from "../../lib/session";
 import { PATHNAME_HEADER } from "../../lib/session-shared";
+import { readFacilityCookie } from "../../lib/facility-context";
 import type { MembershipsResponse } from "../../lib/memberships";
 import { HxErrorPanel } from "../../components/design-system/hx-feedback";
 import { WorkspaceShell } from "./workspace-shell";
@@ -94,5 +95,17 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
       />
     );
   }
-  return <WorkspaceShell memberships={memberships.items}>{children}</WorkspaceShell>;
+  // H-002: Cookie の facilityId はメンバーシップとの照合にのみ使い、
+  // 含まれない値（改ざん・失効）は未選択として扱う。
+  const selectedFacilityId = await readFacilityCookie();
+  const selected =
+    selectedFacilityId !== null
+      ? (memberships.items.find((m) => m.facilityId === selectedFacilityId) ?? null)
+      : null;
+
+  return (
+    <WorkspaceShell memberships={memberships.items} selectedFacility={selected}>
+      {children}
+    </WorkspaceShell>
+  );
 }
