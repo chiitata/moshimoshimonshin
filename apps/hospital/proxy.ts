@@ -49,6 +49,18 @@ export function securityHeaders(nonce: string, development: boolean, input: Clie
   };
 }
 
+const SESSION_COOKIE_PROD = "__Host-mmr-session";
+const SESSION_COOKIE_DEV = "mmr-session";
+
+/** (workspace) グループ配下の業務ページ。セッションCookieの有無で楽観的に振り分ける。 */
+const PROTECTED_PREFIXES = ["/facilities", "/deliveries", "/staff", "/settings"];
+
+/**
+ * セキュリティヘッダー付与（#90）＋楽観的認証ガード（H-001）。
+ * Cookieの有無だけを見て素早くリダイレクトし、本検証はページ側の
+ * (workspace)/layout.tsx が API 経由で行う（Proxyは認可の正本にしない）。
+ * no-store は securityHeaders 側で全レスポンスに付与される。
+ */
 export function proxy(request: NextRequest) {
   const nonce = randomBytes(32).toString("base64");
   const headers = securityHeaders(nonce, process.env.NODE_ENV === "development", {
@@ -65,7 +77,24 @@ export function proxy(request: NextRequest) {
   // Overwrite untrusted client headers before Next.js extracts the script nonce.
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", headers["Content-Security-Policy"]);
-  const response = NextResponse.next({ request: { headers: requestHeaders } });
+
+  const { pathname } = request.nextUrl;
+  const hasSession =
+    request.cookies.has(SESSION_COOKIE_PROD) || request.cookies.has(SESSION_COOKIE_DEV);
+  const isProtected = PROTECTED_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`),
+  );
+
+  let response: NextResponse;
+  if (isProtected && !hasSession) {
+    const url = new URL("/login", request.url);
+    if (pathname !== "/") url.searchParams.set("next", pathname);
+    response = NextResponse.redirect(url);
+  } else if (pathname === "/login" && hasSession) {
+    response = NextResponse.redirect(new URL("/facilities", request.url));
+  } else {
+    response = NextResponse.next({ request: { headers: requestHeaders } });
+  }
   for (const [key, value] of Object.entries(headers)) response.headers.set(key, value);
   return response;
 }
