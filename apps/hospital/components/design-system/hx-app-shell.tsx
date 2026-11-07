@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { HxIcon, type HxIconName } from "./hx-icon";
+import { containTabKey, focusableIn } from "../../lib/a11y";
 
 export interface HxNavItem {
   href: string;
@@ -30,9 +31,10 @@ function NavLink({ item, collapsed, onNavigate }: { item: HxNavItem; collapsed?:
         href={item.href}
         onClick={onNavigate}
         aria-current={item.active ? "page" : undefined}
+        aria-label={collapsed ? item.label : undefined}
         title={collapsed ? item.label : undefined}
-        className={`relative flex h-11 items-center gap-3 rounded-sm px-4 text-hx-body transition-colors duration-150 ${
-          collapsed ? "justify-center px-0" : ""
+        className={`relative flex min-h-11 items-center gap-3 rounded-sm text-hx-body transition-colors duration-150 ${
+          collapsed ? "justify-center" : "px-4"
         } ${
           item.active
             ? "bg-hx-nav-active font-semibold text-hx-primary"
@@ -58,6 +60,7 @@ function FacilityBadge({ name }: { name: string | null }) {
   );
 }
 
+// §6.3: <1024px はドロワー、1024–1199px は72pxアイコンレール、1200–1439px は220px、≥1440px は240px。
 export function HxAppShell({
   facilityName,
   staffName,
@@ -67,20 +70,45 @@ export function HxAppShell({
   children,
 }: HxAppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (!drawerOpen) return;
+    const drawer = drawerRef.current;
+    focusableIn(drawer ?? document.body)[0]?.focus();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    // lg 以上へリサイズしたらドロワーは閉じる（常時レールに切り替わるため）
+    const media = window.matchMedia("(min-width: 1024px)");
+    const onMediaChange = () => {
+      if (media.matches) setDrawerOpen(false);
+    };
+    media.addEventListener("change", onMediaChange);
+
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setDrawerOpen(false);
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setDrawerOpen(false);
+        return;
+      }
+      if (drawer) containTabKey(drawer, event);
     }
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      media.removeEventListener("change", onMediaChange);
+      document.body.style.overflow = previousOverflow;
+      menuButtonRef.current?.focus();
+    };
   }, [drawerOpen]);
 
   const pos = framed ? "absolute" : "fixed";
 
   return (
     <div className={framed ? "relative h-full overflow-hidden" : "min-h-screen bg-hx-canvas"}>
+      {/* not-sr-only より後に absolute を指定しないとスキップリンクが不可視のままになるため、この並びを維持する */}
       <a
         href="#hx-main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-[60] focus:rounded-sm focus:bg-hx-primary focus:px-4 focus:py-2 focus:text-hx-on-primary"
@@ -93,12 +121,13 @@ export function HxAppShell({
         className={`${pos} inset-x-0 top-0 z-40 flex h-14 items-center gap-3 border-b border-hx-border bg-hx-surface px-4 md:px-6`}
       >
         <button
+          ref={menuButtonRef}
           type="button"
-          className="inline-flex size-10 items-center justify-center rounded-sm text-hx-text hover:bg-hx-row-hover md:hidden"
+          className="inline-flex size-10 items-center justify-center rounded-sm text-hx-text hover:bg-hx-row-hover lg:hidden"
           aria-expanded={drawerOpen}
           aria-controls="hx-mobile-nav"
-          aria-label="ナビゲーションを開く"
-          onClick={() => setDrawerOpen(true)}
+          aria-label={drawerOpen ? "ナビゲーションを閉じる" : "ナビゲーションを開く"}
+          onClick={() => setDrawerOpen((open) => !open)}
         >
           <HxIcon name="menu" size={20} />
         </button>
@@ -118,7 +147,7 @@ export function HxAppShell({
             <button
               type="button"
               onClick={onSignOut}
-              className="inline-flex h-9 items-center gap-1.5 rounded-sm px-3 text-hx-label font-semibold text-hx-text-subtle hover:bg-hx-row-hover hover:text-hx-text"
+              className="inline-flex h-9 items-center gap-1.5 rounded-sm px-3 text-hx-body font-semibold text-hx-text-subtle hover:bg-hx-row-hover hover:text-hx-text"
             >
               <HxIcon name="logout" size={16} />
               ログアウト
@@ -127,10 +156,10 @@ export function HxAppShell({
         </div>
       </header>
 
-      {/* デスクトップ/タブレット: 常時サイドバー（md=72px アイコン、lg=240px ラベル付き） */}
+      {/* 1024–1199px: 72px アイコンレール */}
       <nav
         aria-label="主要ナビゲーション"
-        className={`${pos} bottom-0 left-0 top-14 z-30 hidden w-18 border-r border-hx-border bg-hx-surface md:block lg:hidden`}
+        className={`${pos} bottom-0 left-0 top-14 z-30 hidden w-18 border-r border-hx-border bg-hx-surface lg:block min-[1200px]:hidden`}
       >
         <ul className="space-y-1 p-2">
           {navItems.map((item) => (
@@ -138,9 +167,10 @@ export function HxAppShell({
           ))}
         </ul>
       </nav>
+      {/* ≥1200px: ラベル付きサイドバー（1200–1439は220px、1440以上は240px） */}
       <nav
         aria-label="主要ナビゲーション"
-        className={`${pos} bottom-0 left-0 top-14 z-30 hidden w-60 border-r border-hx-border bg-hx-surface lg:block`}
+        className={`${pos} bottom-0 left-0 top-14 z-30 hidden w-55 border-r border-hx-border bg-hx-surface min-[1200px]:block min-[1440px]:w-60`}
       >
         <ul className="space-y-1 p-3">
           {navItems.map((item) => (
@@ -149,15 +179,16 @@ export function HxAppShell({
         </ul>
       </nav>
 
-      {/* モバイル: ドロワーナビ */}
+      {/* <1024px: ドロワーナビ */}
       {drawerOpen ? (
-        <div className="fixed inset-0 z-50 md:hidden">
+        <div className="fixed inset-0 z-50 lg:hidden">
           <div
             className="absolute inset-0 bg-hx-text/40"
             aria-hidden="true"
             onClick={() => setDrawerOpen(false)}
           />
           <nav
+            ref={drawerRef}
             id="hx-mobile-nav"
             aria-label="主要ナビゲーション"
             className="absolute bottom-0 left-0 top-0 w-64 bg-hx-surface shadow-xl"
@@ -185,7 +216,7 @@ export function HxAppShell({
       <main
         id="hx-main-content"
         tabIndex={-1}
-        className={`pt-14 md:pl-18 lg:pl-60 ${framed ? "h-full overflow-auto" : "min-h-screen"}`}
+        className={`pt-14 lg:pl-18 min-[1200px]:pl-55 min-[1440px]:pl-60 ${framed ? "h-full overflow-auto" : "min-h-screen"}`}
       >
         <div className="p-4 md:p-6">{children}</div>
       </main>

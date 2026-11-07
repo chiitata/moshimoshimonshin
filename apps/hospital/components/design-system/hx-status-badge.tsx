@@ -44,6 +44,10 @@ export function HxBadge({
 }
 
 export function HxStatusBadge({ status }: { status: HxDeliveryStatus }) {
-  const entry = DELIVERY_STATUS[status];
+  // 未定義の状態値がAPIから来た場合、成功系へ誤表示しないよう中立の「不明」で示す
+  const entry = (DELIVERY_STATUS as Record<string, { label: string; tone: HxStatusTone }>)[status] ?? {
+    label: "不明",
+    tone: "neutral" as const,
+  };
   return <HxBadge tone={entry.tone}>{entry.label}</HxBadge>;
 }

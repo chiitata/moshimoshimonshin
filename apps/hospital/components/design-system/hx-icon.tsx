@@ -42,6 +42,12 @@ const PATHS = {
       <path d="M12 16.8v.2" />
     </>
   ),
+  chevrons: (
+    <>
+      <path d="m7 10 5-5 5 5" />
+      <path d="m7 14 5 5 5-5" />
+    </>
+  ),
   "chevron-down": <path d="m6 9.5 6 6 6-6" />,
   "chevron-left": <path d="M14.5 6 8.5 12l6 6" />,
   "chevron-right": <path d="m9.5 6 6 6-6 6" />,

@@ -3,9 +3,9 @@
 import { cloneElement, isValidElement, useId, type ReactElement, type ReactNode } from "react";
 import { HxIcon } from "./hx-icon";
 
-/** HxField 内の input/select/textarea に適用する共通クラス。 */
+/** HxField 内の input/select/textarea に適用する共通クラス。min-h で文字拡大時の伸縮を許す（§17.11）。 */
 export const hxInputClass =
-  "h-9 w-full rounded-sm border border-hx-border bg-hx-surface px-3 text-hx-body text-hx-text placeholder:text-hx-text-subtle/60 hover:border-hx-text-subtle/50 disabled:cursor-not-allowed disabled:bg-hx-surface-subtle disabled:text-hx-text-subtle read-only:bg-hx-canvas aria-[invalid=true]:border-hx-danger";
+  "min-h-9 w-full rounded-sm border border-hx-border bg-hx-surface px-3 py-1.5 text-hx-body text-hx-text placeholder:text-hx-text-subtle/60 hover:border-hx-text-subtle/50 disabled:cursor-not-allowed disabled:bg-hx-surface-subtle disabled:text-hx-text-subtle read-only:bg-hx-canvas aria-[invalid=true]:border-hx-danger";
 
 export interface HxFieldProps {
   label: string;
@@ -36,17 +36,30 @@ export function HxField({
     .filter(Boolean)
     .join(" ") || undefined;
 
-  const control = isValidElement(children)
-    ? cloneElement(children as ReactElement<Record<string, unknown>>, {
-        id,
-        "aria-describedby": describedBy,
-        "aria-invalid": error ? true : undefined,
-      })
-    : children;
+  let control = children;
+  if (isValidElement(children)) {
+    const childProps = children.props as Record<string, unknown>;
+    const mergedDescribedBy =
+      [typeof childProps["aria-describedby"] === "string" ? (childProps["aria-describedby"] as string) : null, describedBy]
+        .filter(Boolean)
+        .join(" ") || undefined;
+    control = cloneElement(children as ReactElement<Record<string, unknown>>, {
+      id: typeof childProps.id === "string" ? childProps.id : id,
+      "aria-describedby": mergedDescribedBy,
+      "aria-invalid": error ? true : (childProps["aria-invalid"] as unknown),
+      required: required ? true : (childProps.required as unknown),
+    });
+  } else if (process.env.NODE_ENV !== "production") {
+    console.warn("HxField: label 紐づけのため input/select/textarea を1つ渡してください。");
+  }
+  const controlId =
+    isValidElement(children) && typeof (children.props as Record<string, unknown>).id === "string"
+      ? ((children.props as Record<string, unknown>).id as string)
+      : id;
 
   return (
     <div className="space-y-1.5">
-      <label htmlFor={id} className="flex items-center gap-2 text-hx-label font-semibold text-hx-text">
+      <label htmlFor={controlId} className="flex items-center gap-2 text-hx-label font-semibold text-hx-text">
         {label}
         {required ? (
           <span className="rounded-xs bg-hx-danger-bg px-1.5 py-0.5 text-hx-caption font-semibold text-hx-danger">

@@ -13,10 +13,10 @@ const VARIANTS: Record<HxButtonVariant, string> = {
   subtle: "text-hx-primary hover:bg-hx-row-hover disabled:hover:bg-transparent",
 };
 
-// §6.4: 主ボタン高さ36〜40px、二次ボタン32〜36px。アイコンボタンは36×36以上。
+// §6.4: 主ボタン高さ36〜40px、二次ボタン32〜36px。min-h で文字拡大時の伸縮を許す。
 const SIZES: Record<HxButtonSize, string> = {
-  md: "h-10 px-4",
-  sm: "h-8 px-3 text-hx-label",
+  md: "min-h-10 px-4 py-1.5",
+  sm: "min-h-8 px-3 py-1",
 };
 
 export interface HxButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

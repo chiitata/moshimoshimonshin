@@ -2,9 +2,7 @@
 
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { HxButton } from "./hx-button";
-
-const FOCUSABLE =
-  'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
+import { containTabKey, focusableIn } from "../../lib/a11y";
 
 export interface HxDialogProps {
   open: boolean;
@@ -32,6 +30,11 @@ export function HxDialog({
   const descId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
+  // 呼び出し側のインライン関数で effect が再実行されフォーカスが飛ばないよう参照だけ最新化する
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -39,39 +42,28 @@ export function HxDialog({
     const panel = panelRef.current;
     const target =
       panel?.querySelector<HTMLElement>("[data-autofocus]") ??
-      panel?.querySelector<HTMLElement>(FOCUSABLE);
+      focusableIn(panel ?? document.body)[0] ??
+      panel;
     target?.focus();
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
-      if (event.key !== "Tab" || !panel) return;
-      const items = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-        (el) => el.offsetParent !== null || el === document.activeElement,
-      );
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
+      if (panel) containTabKey(panel, event);
     }
 
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = "";
+      document.body.style.overflow = previousOverflow;
       restoreRef.current?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
@@ -84,7 +76,8 @@ export function HxDialog({
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={description ? descId : undefined}
-        className={`relative w-full ${widthClass} rounded-lg bg-hx-surface shadow-xl`}
+        tabIndex={-1}
+        className={`relative flex max-h-[calc(100dvh-2rem)] w-full flex-col overflow-y-auto ${widthClass} rounded-lg bg-hx-surface shadow-xl`}
       >
         <div className="space-y-2 px-6 pt-5">
           <h2 id={titleId} className="text-hx-section-title font-semibold">
@@ -98,7 +91,7 @@ export function HxDialog({
         </div>
         {children ? <div className="px-6 py-4 text-hx-body">{children}</div> : null}
         {footer ? (
-          <div className="flex justify-end gap-3 border-t border-hx-divider px-6 py-4">{footer}</div>
+          <div className="mt-auto flex justify-end gap-3 border-t border-hx-divider px-6 py-4">{footer}</div>
         ) : null}
       </div>
     </div>
@@ -108,7 +101,7 @@ export function HxDialog({
 export interface HxConfirmActionDialogProps {
   open: boolean;
   /** 操作対象（施設名・氏名・問診IDなど必要最小限、§17.9） */
-  subject?: string;
+  subject: string;
   title: string;
   description: string;
   /** 確認ボタンは「受領を確認する」「職員を停止する」など動詞を具体化 */
@@ -149,12 +142,10 @@ export function HxConfirmActionDialog({
         </>
       }
     >
-      {subject ? (
-        <p className="rounded-sm bg-hx-surface-subtle px-3 py-2 text-hx-body">
-          <span className="font-semibold">対象：</span>
-          {subject}
-        </p>
-      ) : null}
+      <p className="rounded-sm bg-hx-surface-subtle px-3 py-2 text-hx-body">
+        <span className="font-semibold">対象：</span>
+        {subject}
+      </p>
     </HxDialog>
   );
 }

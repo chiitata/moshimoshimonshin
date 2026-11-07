@@ -25,16 +25,16 @@ export function HxDataTable({
 }
 
 export interface HxThProps extends ThHTMLAttributes<HTMLTableCellElement> {
-  /** ソート可能列はボタン＋方向アイコン＋aria-sort（§17.3） */
+  /** ソート可能列はボタン＋方向アイコン＋aria-sort（§17.3）。未適用時は "none"。 */
   sort?: "ascending" | "descending" | "none";
   onSort?: () => void;
 }
 
 export function HxTh({ sort, onSort, children, className = "", ...rest }: HxThProps) {
   const base = `border-b border-hx-border bg-hx-surface-subtle px-3 py-2 text-left align-middle text-hx-table-header font-semibold text-hx-text-subtle ${className}`;
-  if (sort !== undefined && onSort) {
+  if (sort !== undefined) {
     return (
-      <th scope="col" aria-sort={sort === "none" ? undefined : sort} className={base} {...rest}>
+      <th scope="col" aria-sort={sort} className={base} {...rest}>
         <button
           type="button"
           onClick={onSort}
@@ -42,9 +42,9 @@ export function HxTh({ sort, onSort, children, className = "", ...rest }: HxThPr
         >
           {children}
           <HxIcon
-            name={sort === "ascending" ? "chevron-up" : sort === "descending" ? "chevron-down" : "chevron-down"}
+            name={sort === "ascending" ? "chevron-up" : sort === "descending" ? "chevron-down" : "chevrons"}
             size={14}
-            className={sort === "none" ? "opacity-40" : undefined}
+            className={sort === "none" ? "opacity-50" : undefined}
           />
         </button>
       </th>
@@ -57,9 +57,17 @@ export function HxTh({ sort, onSort, children, className = "", ...rest }: HxThPr
   );
 }
 
-export function HxTd({ children, className = "", ...rest }: TdHTMLAttributes<HTMLTableCellElement>) {
+export function HxTd({
+  numeric = false,
+  children,
+  className = "",
+  ...rest
+}: TdHTMLAttributes<HTMLTableCellElement> & { numeric?: boolean }) {
   return (
-    <td className={`border-b border-hx-divider px-3 py-2.5 align-middle ${className}`} {...rest}>
+    <td
+      className={`border-b border-hx-divider px-3 py-2.5 align-middle ${numeric ? "tabular-nums" : ""} ${className}`}
+      {...rest}
+    >
       {children}
     </td>
   );
@@ -76,7 +84,8 @@ export function HxTr({
 }) {
   return (
     <tr
-      className={`h-11 ${selected ? "bg-hx-row-selected" : "hover:bg-hx-row-hover"} ${className}`}
+      // §4.3/§17.3: 選択は色だけでなく左境界を併用する
+      className={`h-11 ${selected ? "bg-hx-row-selected shadow-[inset_2px_0_0_var(--color-hx-primary)]" : "hover:bg-hx-row-hover"} ${className}`}
     >
       {children}
     </tr>

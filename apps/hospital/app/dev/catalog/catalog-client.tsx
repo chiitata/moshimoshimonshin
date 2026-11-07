@@ -23,9 +23,10 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export function CatalogClient() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [sortAsc, setSortAsc] = useState(false);
 
   return (
-    <main className="mx-auto max-w-6xl space-y-6 p-6">
+    <div className="mx-auto max-w-6xl space-y-6 p-6">
       <div className="space-y-1">
         <h1 className="text-hx-page-title font-bold">HX デザインシステム カタログ（開発用）</h1>
         <p className="text-hx-body text-hx-text-subtle">
@@ -85,7 +86,7 @@ export function CatalogClient() {
         <HxDataTable caption="受信問診の一覧（合成サンプル）">
           <thead>
             <tr>
-              <HxTh sort="descending" onSort={() => undefined}>受信日時</HxTh>
+              <HxTh sort={sortAsc ? "ascending" : "descending"} onSort={() => setSortAsc((v) => !v)}>受信日時</HxTh>
               <HxTh>患者表示名</HxTh>
               <HxTh>問診ID</HxTh>
               <HxTh>状態</HxTh>
@@ -160,9 +161,9 @@ export function CatalogClient() {
             staffName="合成 職員"
             onSignOut={() => undefined}
             navItems={[
-              { href: "/dev/catalog", label: "受信問診", icon: "inbox", active: true },
-              { href: "/dev/catalog", label: "職員管理", icon: "users" },
-              { href: "/dev/catalog", label: "施設設定", icon: "settings" },
+              { href: "/dev/catalog#inbox", label: "受信問診", icon: "inbox", active: true },
+              { href: "/dev/catalog#staff", label: "職員管理", icon: "users" },
+              { href: "/dev/catalog#settings", label: "施設設定", icon: "settings" },
             ]}
           >
             <HxPageHeader title="受信問診" description="シェルの枠内プレビューです。" />
@@ -170,6 +171,6 @@ export function CatalogClient() {
           </HxAppShell>
         </div>
       </Section>
-    </main>
+    </div>
   );
 }
