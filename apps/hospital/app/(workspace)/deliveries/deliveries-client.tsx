@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { HxBadge, HxStatusBadge, type HxDeliveryStatus } from "../../../components/design-system/hx-status-badge";
+import { HxStatusBadge, type HxDeliveryStatus } from "../../../components/design-system/hx-status-badge";
 import { HxDataTable, HxTd, HxTh, HxTr } from "../../../components/design-system/hx-data-table";
 import { HxButton } from "../../../components/design-system/hx-button";
 import { HxEmptyState, HxErrorPanel } from "../../../components/design-system/hx-feedback";
@@ -95,9 +95,8 @@ export function DeliveriesClient() {
     [facilityId, statusFilter, appliedQuery],
   );
 
-  // 施設・フィルタ変更時はページングを先頭へリセット
+  // フィルタ変更時は各ハンドラが cursorStack をリセット済み。ここでは先頭ページを読み込む。
   useEffect(() => {
-    setCursorStack([]);
     const controller = new AbortController();
     abortRef.current?.abort();
     abortRef.current = controller;
@@ -112,11 +111,9 @@ export function DeliveriesClient() {
   }
 
   function goPrev() {
-    setCursorStack((stack) => {
-      const next = stack.slice(0, -1);
-      void load(next.length > 0 ? next[next.length - 1]! : null, abortRef.current?.signal);
-      return next;
-    });
+    const next = cursorStack.slice(0, -1);
+    setCursorStack(next);
+    void load(next.length > 0 ? next[next.length - 1]! : null, abortRef.current?.signal);
   }
 
   function applySearch(event: FormEvent) {
@@ -183,7 +180,10 @@ export function DeliveriesClient() {
           <select
             id="delivery-status"
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as "" | HxDeliveryStatus)}
+            onChange={(e) => {
+              setStatusFilter(e.target.value as "" | HxDeliveryStatus);
+              setCursorStack([]);
+            }}
             className={hxInputClass}
           >
             {STATUS_OPTIONS.map((opt) => (
