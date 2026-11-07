@@ -37,7 +37,8 @@ Node.js 22 以降で `npm ci`、`npm run dev` を実行し、http://localhost:30
 - `/settings` は施設管理者（`facility_admin`）専用です。非管理者にはナビ導線を出さず、画面も権限なし表示にします。認可の正本は API 側の `requireFacilityRole` です。
 - `GET /v1/hospitals/{facilityId}/settings`（API-048）が正式名称・表示名・所在地・審査ステータス・受付状態を返します。正式名称・表示名・所在地は患者の宛先確認に使われる審査済み情報のため画面からは変更できず、変更には運営の再審査が必要である旨を案内します（17.14）。
 - 受付の停止/再開は `PATCH /v1/hospitals/{facilityId}/settings`（API-049、直近認証必須）です。停止は新規配送の受付を止めるだけで、受信済みの問診票は引き続き閲覧できます。停止には理由の入力が必須で、理由・日時・操作主体が監査に記録されます（`FACILITY_RECEIVING_DISABLED`/`FACILITY_RECEIVING_ENABLED`）。
-- 運営による受付停止（API-037、`receivingDisabledBy=platform` または未設定）は施設側で再開できず、API が409で拒否します。画面でも再開操作を無効化し、運営への問い合わせを案内します。施設自身が停止した場合（`receivingDisabledBy=staff`）のみ管理者が再開できます。受付状態は `receivingEnabled` 単一フィールドが正本で、患者側の送信可否・施設情報表示と同一の値です。
+- 運営による受付停止（API-037、`receivingDisabledBy=platform` または未設定）は施設側で再開できず、API が409で拒否します。画面でも再開操作を無効化し、運営への問い合わせを案内します。運営側の解除は `POST /v1/operator/facilities/{facilityId}/enable`（API-050）が担います。施設自身が停止した場合（`receivingDisabledBy=staff`）のみ管理者が再開できます。受付状態は `receivingEnabled` 単一フィールドが正本で、患者側の送信可否・施設情報表示と同一の値です。
+- 停止理由は運営記録のため `receivingDisabledBy=staff`（施設自身が記入）の場合のみ画面に表示します。運営停止時の理由は返却されません。
 
 本番配信基盤は未決定です。以下のnonce方式はNext.jsサーバーを必要とするため、既存のHosting静的配信案との調整が必要です。実用化には認証・施設単位の認可・監査・医療情報保護の実装と検証も必要です。
 
