@@ -1,14 +1,15 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { clientConfig } from "./client-config";
+import { facilityCookieName, FACILITY_COOKIE_DEV, FACILITY_COOKIE_PROD, FACILITY_ID_PATTERN } from "./facility-shared";
+
+export { facilityCookieName };
 
 /**
  * 選択中施設のコンテキスト Cookie（H-002）。
  * 値は facilityId のみ。表示名・認可は毎回 API の facilityMemberships と照合するため、
  * Cookie 値の改ざんは UI の誤表示にしかならず、データアクセス権は与えない。
  */
-const FACILITY_COOKIE_PROD = "__Host-mmr-facility";
-const FACILITY_COOKIE_DEV = "mmr-facility";
 
 function facilityCookieOptions() {
   return {
@@ -20,15 +21,11 @@ function facilityCookieOptions() {
   };
 }
 
-export function facilityCookieName(): string {
-  return clientConfig().emulator ? FACILITY_COOKIE_DEV : FACILITY_COOKIE_PROD;
-}
-
 /** Cookie の生値。照合なしで信用しないこと。 */
 export async function readFacilityCookie(): Promise<string | null> {
   const jar = await cookies();
   const value = jar.get(facilityCookieName())?.value;
-  return value && /^[\w-]{1,128}$/.test(value) ? value : null;
+  return value && FACILITY_ID_PATTERN.test(value) ? value : null;
 }
 
 export async function writeFacilityCookie(facilityId: string): Promise<void> {

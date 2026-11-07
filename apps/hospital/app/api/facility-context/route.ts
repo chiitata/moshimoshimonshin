@@ -6,6 +6,7 @@ import {
   sessionApiFetch,
 } from "../../../lib/session";
 import { clearFacilityCookie, writeFacilityCookie } from "../../../lib/facility-context";
+import { FACILITY_ID_PATTERN } from "../../../lib/facility-shared";
 import type { MembershipsResponse } from "../../../lib/memberships";
 
 /**
@@ -26,7 +27,7 @@ export async function POST(req: NextRequest) {
   } catch {
     return portalJson({ error: "bad_request" }, { status: 400 });
   }
-  if (typeof body.facilityId !== "string" || !/^[\w-]{1,128}$/.test(body.facilityId)) {
+  if (typeof body.facilityId !== "string" || !FACILITY_ID_PATTERN.test(body.facilityId)) {
     return portalJson({ error: "bad_request" }, { status: 400 });
   }
 
@@ -41,7 +42,11 @@ export async function POST(req: NextRequest) {
 
   let memberships: MembershipsResponse;
   try {
-    memberships = (await upstream.json()) as MembershipsResponse;
+    const data: unknown = await upstream.json();
+    if (!data || typeof data !== "object" || !Array.isArray((data as MembershipsResponse).items)) {
+      throw new Error("unexpected shape");
+    }
+    memberships = data as MembershipsResponse;
   } catch {
     return portalJson({ error: "upstream_error" }, { status: 502 });
   }

@@ -39,18 +39,19 @@ function UpstreamError({
  * 5xx や接続失敗はログアウトさせず、再試行可能なエラー画面を出す。
  */
 export default async function WorkspaceLayout({ children }: { children: React.ReactNode }) {
-  const session = await readSession();
-  if (!session) {
-    // 無効・空値などの残留Cookieも消してからログインへ戻す
-    redirect("/api/session/logout");
-  }
-
   // RSC データ要求に付く _rsc パラメータだけを落として元URLを復元する
   const rawPath = (await headers()).get(PATHNAME_HEADER) ?? "/facilities";
-  const retryParams = new URLSearchParams(rawPath.split("?")[1] ?? "");
+  const qIndex = rawPath.indexOf("?");
+  const retryParams = new URLSearchParams(qIndex >= 0 ? rawPath.slice(qIndex + 1) : "");
   retryParams.delete("_rsc");
   const query = retryParams.toString();
-  const currentPath = `${rawPath.split("?")[0]}${query ? `?${query}` : ""}`;
+  const currentPath = `${qIndex >= 0 ? rawPath.slice(0, qIndex) : rawPath}${query ? `?${query}` : ""}`;
+
+  const session = await readSession();
+  if (!session) {
+    // 無効・空値などの残留Cookieも消してからログインへ戻す（next も保持）
+    redirect(`/api/session/logout?next=${encodeURIComponent(currentPath)}`);
+  }
 
   const upstream = await sessionApiFetch(session, "/me/facility-memberships").catch(
     () => null,

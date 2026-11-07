@@ -46,11 +46,13 @@ export function FacilitiesClient() {
         redirect: "error",
       });
       if (!response.ok) {
-        setMessage(
-          response.status === 401
-            ? "認証の有効期限が切れました。再度ログインしてください。"
-            : "施設を選択できませんでした。時間をおいて再試行してください。",
-        );
+        if (response.status === 401) {
+          // セッション失効は Cookie 消去込みでログインへ戻す
+          // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- Cookie消去はRoute Handler側で行う必要がある
+          location.assign("/api/session/logout");
+          return;
+        }
+        setMessage("施設を選択できませんでした。時間をおいて再試行してください。");
         return;
       }
       // 施設別状態（一覧・詳細・検索条件）を引き継がないため全面遷移する
@@ -84,6 +86,7 @@ export function FacilitiesClient() {
         <ul className="space-y-3">
           {memberships.map((m) => {
             const isSelected = selected?.membershipId === m.membershipId;
+            const selectable = m.facility !== null;
             return (
               <li
                 key={m.membershipId}
@@ -117,7 +120,7 @@ export function FacilitiesClient() {
                     size="sm"
                     variant={isSelected ? "secondary" : "primary"}
                     loading={busyId === m.membershipId}
-                    disabled={busyId !== null && busyId !== m.membershipId}
+                    disabled={!selectable || (busyId !== null && busyId !== m.membershipId)}
                     onClick={() => void select(m)}
                   >
                     {isSelected ? "この施設で続ける" : "この施設を選択"}
@@ -125,6 +128,10 @@ export function FacilitiesClient() {
                   {isSelected ? (
                     <span className="text-hx-caption font-semibold text-hx-success">
                       選択中の施設です
+                    </span>
+                  ) : !selectable ? (
+                    <span className="text-hx-caption text-hx-text-subtle">
+                      施設情報を取得できないため選択できません
                     </span>
                   ) : null}
                 </div>

@@ -63,7 +63,12 @@ function FacilityBadge({ name, href }: { name: string | null; href?: string }) {
   const cls = "inline-flex min-w-0 items-center gap-1.5 rounded-sm bg-hx-surface-subtle px-2.5 py-1 text-hx-label font-semibold";
   if (href) {
     return (
-      <Link href={href} className={`${cls} hover:bg-hx-row-hover`} title="施設を切り替える">
+      <Link
+        href={href}
+        className={`${cls} hover:bg-hx-row-hover`}
+        aria-label={`${name ?? "施設未選択"}、施設を切り替える`}
+        title="施設を切り替える"
+      >
         {body}
       </Link>
     );
