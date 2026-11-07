@@ -32,6 +32,8 @@ const DENIED_COLLECTIONS = [
   "passkeyCredentials",
   "registrationOperations",
   "pushDevices",
+  "idempotencyKeys",
+  "deliveryAttempts",
 ] as const;
 
 // サブコレクション（{document=**} が届くことを確認する代表例）
@@ -39,6 +41,7 @@ const DENIED_SUBCOLLECTION_DOCS = [
   "intakes/intake1/questions/q1",
   "intakes/intake1/answers/a1",
   "questionnaires/qn1/revisions/1",
+  "ocrJobs/job1/candidates/c1",
 ] as const;
 
 describe("firestore.rules", () => {
@@ -73,9 +76,19 @@ describe("firestore.rules", () => {
         await assertFails(ref.delete());
       });
 
-      it("appConfigs 配下の他ドキュメントは読取も拒否", async () => {
+      it("appConfigs の list は拒否（公開doc以外の一覧漏洩防止）", async () => {
+        await assertFails(ctx().firestore().collection("appConfigs").get());
+      });
+
+      it("appConfigs 配下の他ドキュメントは読取・書込とも拒否", async () => {
+        const ref = ctx().firestore().doc("appConfigs/internalConfig");
+        await assertFails(ref.get());
+        await assertFails(ref.set({ secret: "value" }));
+      });
+
+      it("appConfigs 配下のサブコレクションは拒否", async () => {
         await assertFails(
-          ctx().firestore().doc("appConfigs/internalConfig").get(),
+          ctx().firestore().doc("appConfigs/publicLegalVersion/nested/x").get(),
         );
       });
 
@@ -103,9 +116,11 @@ describe("firestore.rules", () => {
       );
 
       it.each(DENIED_SUBCOLLECTION_DOCS)(
-        "サブコレクション %s の読取は拒否",
+        "サブコレクション %s の読取・書込は拒否",
         async (path) => {
-          await assertFails(ctx().firestore().doc(path).get());
+          const ref = ctx().firestore().doc(path);
+          await assertFails(ref.get());
+          await assertFails(ref.set({ any: "field" }));
         },
       );
 

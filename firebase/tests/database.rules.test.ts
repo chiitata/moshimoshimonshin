@@ -66,8 +66,12 @@ describe("database.rules.json", () => {
         await assertFails(ctx().database().ref("operationalCounters").get());
       });
 
-      it("ルート / の読取は拒否（部分公開でも全件読取は不可）", async () => {
-        await assertFails(ctx().database().ref("/").get());
+      it("ルート / の読取・書込は拒否（部分公開でも全件アクセスは不可）", async () => {
+        const root = ctx().database().ref("/");
+        await assertFails(root.get());
+        await assertFails(root.set({ a: 1 }));
+        // push() は ThenableReference を返すため Promise 化してから assertFails へ渡す
+        await assertFails(Promise.resolve(root.push({ a: 1 })));
       });
 
       it.each(FORBIDDEN_PATHS)(

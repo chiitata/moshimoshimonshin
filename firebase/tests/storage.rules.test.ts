@@ -62,10 +62,24 @@ describe("storage.rules", () => {
         await assertFails(ctx().storage(bucket).ref(path).delete());
       });
 
-      it("list / listAll は拒否", async () => {
-        const root = ctx().storage(bucket).ref("uploads");
-        await assertFails(root.listAll());
-        await assertFails(root.list({ maxResults: 10 }));
+      it.each(OBJECT_PATHS)(
+        "%s のメタデータ更新・putString は拒否",
+        async (path) => {
+          const ref = ctx().storage(bucket).ref(path);
+          await assertFails(ref.updateMetadata({ contentType: "text/plain" }));
+          await assertFails(
+            new Promise((resolve, reject) =>
+              ref.putString("data").then(resolve, reject),
+            ),
+          );
+        },
+      );
+
+      it("list / listAll は拒否（プレフィックス・ルートとも）", async () => {
+        const uploads = ctx().storage(bucket).ref("uploads");
+        await assertFails(uploads.listAll());
+        await assertFails(uploads.list({ maxResults: 10 }));
+        await assertFails(ctx().storage(bucket).ref().listAll());
       });
     },
   );
