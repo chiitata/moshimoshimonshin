@@ -137,6 +137,27 @@ describe("staff management", () => {
     await app.close();
   });
 
+  it("職員以外のロールや異常な状態のメンバーシップは一覧から除外し500にしない", async () => {
+    const { app, deps } = await setup();
+    await deps.db.doc("facilityMemberships/platform").set({
+      userUid: "plat", facilityId, role: "platform_security_admin", status: "active",
+    });
+    await deps.db.doc("facilityMemberships/odd").set({
+      userUid: "odd", facilityId, role: "facility_staff", status: "suspended",
+    });
+    const res = await app.inject({
+      method: "GET",
+      url: `/v1/hospitals/${facilityId}/staff`,
+      headers: authHeader("admin"),
+    });
+    expect(res.statusCode).toBe(200);
+    const uids = res.json().members.map((m: { userUid: string }) => m.userUid);
+    expect(uids).not.toContain("plat");
+    expect(uids).not.toContain("odd");
+    expect(uids).toEqual(expect.arrayContaining(["admin", "staff"]));
+    await app.close();
+  });
+
   it("管理者は自身の停止・降格を行えない（最終管理者の喪失防止）", async () => {
     const { app } = await setup();
     const url = `/v1/hospitals/${facilityId}/memberships/admin`;

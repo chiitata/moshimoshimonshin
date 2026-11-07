@@ -95,37 +95,73 @@ export function registerStaffRoutes(app: FastifyInstance, deps: Deps): void {
       { field: "status", op: "==", value: "pending" },
     ], { limit: 100 });
 
-    // メール表示は Firebase Auth が正本。未登録・退会済みは null（権限とは無関係の表示情報）
-    const members = await Promise.all(
-      memberRows.map(async (r) => {
-        let email: string | null = null;
-        try {
-          const user = await deps.authAdmin.getUser(r.data.userUid);
-          email = user?.email ?? null;
-        } catch {
-          email = null;
-        }
-        return {
-          membershipId: r.id,
-          userUid: r.data.userUid,
-          email,
-          role: r.data.role as z.infer<typeof staffRole>,
-          status: r.data.status as "active" | "revoked",
-          createdAt: toIsoLocal(r.data.createdAt),
-          revokedAt: toIsoLocal(r.data.revokedAt),
-        };
-      }),
-    );
-
-    return {
-      members,
-      invitations: invitationRows.map((r) => ({
+    // 保存済みデータに職員以外のロール・未知の状態が混ざっていても一覧を落とさない
+    const staffMembers = memberRows.flatMap((r) => {
+      const role = staffRole.safeParse(r.data.role);
+      const status =
+        r.data.status === "active" || r.data.status === "revoked"
+          ? (r.data.status as "active" | "revoked")
+          : null;
+      if (!role.success || status === null) {
+        req.log.warn({ membershipId: r.id }, "anomalous facilityMembership skipped in staff list");
+        return [];
+      }
+      return [{ row: r, role: role.data, status }];
+    });
+    const invitations = invitationRows.flatMap((r) => {
+      const role = staffRole.safeParse(r.data.role);
+      if (!role.success) {
+        req.log.warn({ invitationId: r.id }, "anomalous facilityInvitation skipped in staff list");
+        return [];
+      }
+      return [{
         invitationId: r.id,
         email: r.data.email,
-        role: r.data.role as z.infer<typeof staffRole>,
+        role: role.data,
         createdAt: toIsoLocal(r.data.createdAt),
-      })),
-    };
+      }];
+    });
+
+    // メール表示は Firebase Auth が正本。未登録・退会済みは null（権限とは無関係の表示情報）
+    // Auth への問い合わせは20件ずつに制限し、メンバー数分の同時呼び出しを避ける
+    const members: Array<{
+      membershipId: string;
+      userUid: string;
+      email: string | null;
+      role: z.infer<typeof staffRole>;
+      status: "active" | "revoked";
+      createdAt: string | null;
+      revokedAt: string | null;
+    }> = [];
+    for (let i = 0; i < staffMembers.length; i += 20) {
+      const chunk = await Promise.all(
+        staffMembers.slice(i, i + 20).map(async ({ row: r, role, status }) => {
+          let email: string | null = null;
+          try {
+            const user = await deps.authAdmin.getUser(r.data.userUid);
+            email = user?.email ?? null;
+          } catch (err) {
+            // user-not-found は正常（退会済み）。それ以外は Auth 障害の可能性があるため記録する
+            if ((err as { code?: string }).code !== "auth/user-not-found") {
+              req.log.warn({ err, userUidHash: auditUidHash(deps, r.data.userUid) }, "auth getUser failed in staff list");
+            }
+            email = null;
+          }
+          return {
+            membershipId: r.id,
+            userUid: r.data.userUid,
+            email,
+            role,
+            status,
+            createdAt: toIsoLocal(r.data.createdAt),
+            revokedAt: toIsoLocal(r.data.revokedAt),
+          };
+        }),
+      );
+      members.push(...chunk);
+    }
+
+    return { members, invitations };
   });
 
   typed.post("/v1/hospitals/:facilityId/staff-invitations", {
@@ -133,7 +169,7 @@ export function registerStaffRoutes(app: FastifyInstance, deps: Deps): void {
     schema: {
       params,
       body: invitationBody,
-      response: { 201: z.object({ invitationId: z.string(), status: z.literal("pending") }), ...errors(401, 403, 409) },
+      response: { 201: z.object({ invitationId: z.string(), status: z.literal("pending") }), ...errors(400, 401, 403, 409) },
       tags: ["hospitals"],
       security: [{ bearerAuth: [] }],
     },
@@ -192,7 +228,7 @@ export function registerStaffRoutes(app: FastifyInstance, deps: Deps): void {
     schema: {
       params: memberParams,
       body: membershipBody,
-      response: { 200: z.object({ membershipId: z.string(), role: staffRole, status: z.enum(["active", "revoked"]) }), ...errors(401, 403, 404, 409) },
+      response: { 200: z.object({ membershipId: z.string(), role: staffRole, status: z.enum(["active", "revoked"]) }), ...errors(400, 401, 403, 404, 409) },
       tags: ["hospitals"],
       security: [{ bearerAuth: [] }],
     },
@@ -212,6 +248,22 @@ export function registerStaffRoutes(app: FastifyInstance, deps: Deps): void {
       }
       const role = req.body.role ?? member.role;
       const status = req.body.status ?? member.status;
+      // 有効な施設管理者が権限を失う変更は、同時実行でも施設に管理者が残ることを tx 内で確認する
+      const losesAdmin = member.role === "facility_admin" && member.status === "active" &&
+        (role !== "facility_admin" || status !== "active");
+      if (losesAdmin) {
+        const adminsSnap = await tx.get(
+          deps.db.collection("facilityMemberships")
+            .where("facilityId", "==", req.params.facilityId)
+            .where("role", "==", "facility_admin")
+            .where("status", "==", "active")
+            .limit(2),
+        );
+        const others = adminsSnap.docs.filter((d) => d.id !== req.params.membershipId);
+        if (others.length === 0) {
+          throw ApiError.conflict(ErrorCodes.REVISION_CONFLICT, "施設に有効な管理者が残らなくなるため変更できません。");
+        }
+      }
       if (!staffRole.safeParse(role).success || (status !== "active" && status !== "revoked")) {
         // 保存済みデータが不正（権限不足ではなくデータ不整合）
         throw ApiError.conflict(ErrorCodes.REVISION_CONFLICT, "メンバーシップの状態が不正です。");
