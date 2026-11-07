@@ -135,6 +135,7 @@ export async function disableFacilityReceiving(
       receivingEnabled: false,
       receivingDisabledAt: now,
       receivingDisabledReason: params.reason,
+      receivingDisabledBy: "platform",
       updatedAt: now,
     });
     committedAudits.push(
