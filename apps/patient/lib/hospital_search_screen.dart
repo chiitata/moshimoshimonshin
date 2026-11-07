@@ -180,15 +180,9 @@ class _ResultCard extends StatelessWidget {
               Text('運営確認日: ${result.confirmedOn}'),
               const SizedBox(height: 8),
               const Text('詳細（P-031）はこのデモでは未接続です。'),
-              Semantics(
-                button: true,
-                enabled: false,
-                excludeSemantics: true,
-                label: '${result.name}を選ぶ',
-                child: const ElevatedButton(
-                  onPressed: null,
-                  child: Text('この施設を選ぶ'),
-                ),
+              ElevatedButton(
+                onPressed: null,
+                child: Text('${result.name}を選ぶ'),
               ),
             ] else
               const Text('場所の案内のみ（送信不可）'),

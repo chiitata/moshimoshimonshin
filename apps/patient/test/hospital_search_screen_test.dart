@@ -55,11 +55,12 @@ void main() {
     }
   });
 
-  testWidgets('施設選択に読み上げ用ラベルがある', (tester) async {
-    final semantics = tester.ensureSemantics();
+  testWidgets('施設選択ボタンに施設名を含む', (tester) async {
     await tester.pumpWidget(const HospitalSearchPreview());
-    expect(find.bySemanticsLabel('サンプル中央クリニックを選ぶ'), findsOneWidget);
-    semantics.dispose();
+    expect(
+      find.widgetWithText(ElevatedButton, 'サンプル中央クリニックを選ぶ'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('狭画面で200%拡大しても例外なく表示できる', (tester) async {
