@@ -15,6 +15,10 @@ Terraform（google provider v6）で宣言的に管理する版。採用判断�
 | `cloud_tasks.tf` | `ocr` / `delivery` / `deletion-retry` キュー | #31 |
 | `cloud_scheduler.tf` | `deletion-scan` / `upload-expiry-scan` | #31 |
 | `firestore.tf` | Firestore(Native/東京/PITR)＋日次バックアップ | #35 |
+| `monitoring.tf` | opt-inの非LLM API log metric・99.5% SLO・アラート・ダッシュボード | #39 |
+
+監視は既定で無効。費用・既存資源・通知担当を確認してから有効化する。
+通知channelが空ならアラートはdisabled。[測定範囲、適用・合成受入、残要件](../monitoring/README.md)を参照。
 
 ## 管理対象外（境界）
 
