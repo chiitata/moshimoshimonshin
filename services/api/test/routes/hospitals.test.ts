@@ -175,6 +175,72 @@ describe("hospital receive routes (#18, API-031〜033)", () => {
       expect(p2.nextCursor).toBeNull();
     });
 
+    it("patientDisplayName を一覧に返す（senderUid は返さない）", async () => {
+      const { deps, app } = await setup();
+      await seedMembership(deps, STAFF_A, FACILITY_A);
+      await seedDelivery(deps, "d-name", FACILITY_A, {
+        patientDisplayName: "山田 太郎",
+      });
+      await seedDelivery(deps, "d-no-name", FACILITY_A);
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/v1/hospitals/${FACILITY_A}/deliveries`,
+        headers: authHeader(STAFF_A),
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as {
+        deliveries: Array<{ deliveryId: string; patientDisplayName: string | null }>;
+      };
+      const named = body.deliveries.find((d) => d.deliveryId === "d-name");
+      const unnamed = body.deliveries.find((d) => d.deliveryId === "d-no-name");
+      expect(named?.patientDisplayName).toBe("山田 太郎");
+      expect(unnamed?.patientDisplayName).toBeNull();
+    });
+
+    it("status で絞り込める", async () => {
+      const { deps, app } = await setup();
+      await seedMembership(deps, STAFF_A, FACILITY_A);
+      await seedDelivery(deps, "d-del", FACILITY_A);
+      await seedDelivery(deps, "d-ack", FACILITY_A, {
+        status: "acknowledged",
+        acknowledgedAt: Timestamp.fromDate(new Date("2026-01-02T00:00:00Z")),
+      });
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/v1/hospitals/${FACILITY_A}/deliveries?status=acknowledged`,
+        headers: authHeader(STAFF_A),
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { deliveries: Array<{ deliveryId: string }> };
+      expect(body.deliveries.map((d) => d.deliveryId)).toEqual(["d-ack"]);
+    });
+
+    it("q は患者表示名の前方一致で自院スコープに限定される", async () => {
+      const { deps, app } = await setup();
+      await seedMembership(deps, STAFF_A, FACILITY_A);
+      await seedDelivery(deps, "d-yamada", FACILITY_A, {
+        patientDisplayName: "山田 太郎",
+      });
+      await seedDelivery(deps, "d-sato", FACILITY_A, {
+        patientDisplayName: "佐藤 花子",
+      });
+      // 他院の同名患者は混ざらない
+      await seedDelivery(deps, "d-b-yamada", FACILITY_B, {
+        patientDisplayName: "山田 次郎",
+      });
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/v1/hospitals/${FACILITY_A}/deliveries?q=${encodeURIComponent("山田")}`,
+        headers: authHeader(STAFF_A),
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { deliveries: Array<{ deliveryId: string }> };
+      expect(body.deliveries.map((d) => d.deliveryId)).toEqual(["d-yamada"]);
+    });
+
     it("失効したカーソルは空ページを返す", async () => {
       const { deps, app } = await setup();
       await seedMembership(deps, STAFF_A, FACILITY_A);
