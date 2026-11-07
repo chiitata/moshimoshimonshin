@@ -131,6 +131,11 @@ gcloud artifacts repositories create api \
 [単一プロジェクトの設定案生成・適用・検証手順](storage/README.md)。
 単一projectの実在origin・31日lifecycle・7日soft deleteを設定。
 
+## Firebase Auth（#34）
+
+[TOTP設定ツールとProvider/OAuth・メール・職員MFA・失効の受入手順](auth/README.md)。
+既定は読取専用。Identity Platformへのアップグレードや全利用者へのMFA強制は行わない。
+
 ## 非同期ジョブ基盤（Issue #31）
 
 OCR・医療機関への送信・退会削除・期限/整合性スキャンを支える
