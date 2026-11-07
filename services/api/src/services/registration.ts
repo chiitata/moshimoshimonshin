@@ -358,7 +358,11 @@ async function reconcileEmailConflict(
 ): Promise<void> {
   const existing = await deps.authAdmin
     .getUserByEmail(body.email)
-    .catch(() => undefined);
+    .catch((err) => {
+      // 未存在のみ欠落扱い。一過性のAuth障害は409へ誤分類しないため再送する
+      if (isAuthError(err, "auth/user-not-found")) return undefined;
+      throw err;
+    });
   if (existing && existing.uid === operation.uid) {
     return;
   }

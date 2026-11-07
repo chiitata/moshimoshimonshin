@@ -42,7 +42,7 @@ function emulatorHostAndPort(envVar: string): { host: string; port: number } {
   }
   const withoutScheme = raw.replace(/^https?:\/\//, "");
   const sep = withoutScheme.lastIndexOf(":");
-  const host = sep === -1 ? withoutScheme : withoutScheme.slice(0, sep);
+  let host = sep === -1 ? withoutScheme : withoutScheme.slice(0, sep);
   const port = Number(withoutScheme.slice(sep + 1));
   if (!host || !Number.isInteger(port) || port <= 0 || port > 65535) {
     throw new Error(`${envVar} の形式が不正です: ${raw}`);
@@ -52,8 +52,12 @@ function emulatorHostAndPort(envVar: string): { host: string; port: number } {
       `${envVar} はループバックのエミュレータのみ許可します: ${raw}`,
     );
   }
-  // 0.0.0.0 は bind アドレスであり接続先にはならないため正規化する
-  return { host: host === "0.0.0.0" ? "127.0.0.1" : host, port };
+  // 0.0.0.0 は bind アドレスであり接続先にはならないため正規化する。
+  // IPv6 リテラルも URL 組立てを単純化するため IPv4 ループバックへ寄せる。
+  if (host === "0.0.0.0" || host === "::1" || host === "[::1]") {
+    host = "127.0.0.1";
+  }
+  return { host, port };
 }
 
 interface EmulatorHandles {
@@ -79,6 +83,13 @@ export function emulatorAdmin(): EmulatorHandles {
       getApps().length > 0
         ? getApps()[0]!
         : initializeApp({ projectId: EMULATOR_PROJECT_ID });
+    // 既存 default app が別プロジェクトなら誤った接続先になるため拒否する
+    if (app.options.projectId !== EMULATOR_PROJECT_ID) {
+      throw new Error(
+        `default admin app の projectId が ${EMULATOR_PROJECT_ID} ではありません: ` +
+          `${app.options.projectId}`,
+      );
+    }
     cached = { app, firestore: getFirestore(app), auth: getAuth(app) };
   }
   return cached;
@@ -207,6 +218,11 @@ export interface EmulatorDeps extends TestDeps {
   flakyAuthAdmin?: FlakyAuthAdmin;
   /** realAuth 指定時の本物の Admin SDK Auth（ユーザー実在検証用）。 */
   emulatorAuth?: Auth;
+  /**
+   * 継承元の memDb は接続されていない（deps.db は実 Firestore）。
+   * memDb.raw()/listAllPaths() 等で検査しても何も見えないため使用しない。
+   */
+  memDb: TestDeps["memDb"];
 }
 
 /**

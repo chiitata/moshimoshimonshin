@@ -286,6 +286,46 @@ describe("E2E server-side perspectives / Firestore エミュレータ結合", ()
     expect(answers.docs[0]!.data().questionId).toBe(questionId);
   });
 
+  it("E2E-003: 薬剤誤抽出の修正→「服薬状況は不明」で未確認登録される", async () => {
+    await seedAccount(deps, PATIENT);
+    await seedCurrentConsents(deps, PATIENT);
+
+    // OCR誤認識を利用者が修正し、服薬状況=不明・未確認のまま登録
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/medications",
+      headers: { ...authHeader(PATIENT), ...idem("med-e2e3") },
+      payload: {
+        displayName: "正しい薬剤名", // OCR候補の誤値を利用者が上書き
+        strength: null, // 誤抽出の強度は明示的にクリア
+        currentStatus: "not_sure",
+        confirmationStatus: "unconfirmed",
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const { medicationId } = res.json() as { medicationId: string };
+
+    // 実FS上で「本人の申告、未確認」として保持される
+    const doc = (
+      await deps.firestore.doc(`medications/${medicationId}`).get()
+    ).data()!;
+    expect(doc.displayName).toBe("正しい薬剤名");
+    expect(doc.currentStatus).toBe("not_sure");
+    expect(doc.confirmationStatus).toBe("unconfirmed");
+
+    // 一覧でも未確認のまま返る（誤った元候補を勝手に確定扱いしない）
+    const list = await app.inject({
+      method: "GET",
+      url: "/v1/medications",
+      headers: authHeader(PATIENT),
+    });
+    expect(list.statusCode).toBe(200);
+    const items = (list.json() as { medications: Array<{ medicationId: string; confirmationStatus: string }> })
+      .medications;
+    const item = items.find((m) => m.medicationId === medicationId);
+    expect(item?.confirmationStatus).toBe("unconfirmed");
+  });
+
   it("E2E-004: 他院の Delivery は404で拒否・存在も区別不可・deny監査のみ残る", async () => {
     await seedAccount(deps, STAFF_B);
     await seedCurrentConsents(deps, STAFF_B);
@@ -385,6 +425,29 @@ describe("E2E server-side perspectives / Firestore エミュレータ結合", ()
     await seedCurrentConsents(deps, PATIENT);
     await seedFacility(deps, FAC_A, { receivingEnabled: false });
 
+    // 停止前に配送済みの既存Delivery（影響を受けないことを確認する対象）
+    const now = FieldValue.serverTimestamp();
+    await deps.db.doc("deliveries/dlv-existing-1").set({
+      senderUid: PATIENT,
+      facilityId: FAC_A,
+      questionnaireId: "qn-old",
+      questionnaireRevisionId: "rev-1",
+      consentId: "consent-1",
+      shareScope: {
+        includeProfile: true,
+        includeConfirmedMedications: false,
+        includePrescriptionImages: false,
+      },
+      patientIdentitySnapshot: {},
+      questionnaireSnapshot: {},
+      snapshotSha256: "b".repeat(64),
+      status: "delivered",
+      idempotencyKeyHash: "h",
+      facilityRetentionPolicyVersion: "v1",
+      createdAt: now,
+      deliveredAt: now,
+    } satisfies Partial<DeliveryDoc>);
+
     const questionnaireId = await makeFinalizedQuestionnaire(app, PATIENT);
 
     const res = await app.inject({
@@ -405,9 +468,11 @@ describe("E2E server-side perspectives / Firestore エミュレータ結合", ()
     });
     expect(res.statusCode).toBe(412);
 
-    // delivery は1件も作成されない
+    // 既存Deliveryは影響を受けず、新規も作成されない
     const deliveries = await deps.firestore.collection("deliveries").get();
-    expect(deliveries.size).toBe(0);
+    expect(deliveries.size).toBe(1);
+    expect(deliveries.docs[0]!.id).toBe("dlv-existing-1");
+    expect(deliveries.docs[0]!.data().status).toBe("delivered");
   });
 
   it("テナント境界（IDOR）: 他人の intake は参照も更新もできない", async () => {

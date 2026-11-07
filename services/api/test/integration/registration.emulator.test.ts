@@ -187,7 +187,7 @@ describe("registerEmail / Auth・Firestore エミュレータ結合", () => {
     expect(opsAfter.docs[0]!.data().status).toBe("enabled");
   });
 
-  it("Firestore tx後のAuth有効化失敗→consents_committedで残り再開で収束（失敗注入）", async () => {
+  it("Firestore tx後のAuth有効化失敗→台帳failed→再開で収束・同意書は二重発行しない（失敗注入）", async () => {
     // tx は成功させ、Auth updateUser のみ失敗させる
     deps.flakyAuthAdmin!.failNext.set("updateUser", 1);
     await expect(
