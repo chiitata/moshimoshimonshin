@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { onIdTokenChanged } from "firebase/auth";
 import { HxBadge } from "../../../components/design-system/hx-status-badge";
 import { HxDataTable, HxTd, HxTh, HxTr } from "../../../components/design-system/hx-data-table";
 import { HxButton } from "../../../components/design-system/hx-button";
@@ -59,14 +60,21 @@ export function StaffClient() {
   const facilityId = selected?.facilityId ?? null;
   const isAdmin = selected?.role === "facility_admin";
   // 自分自身のメンバーシップ行は権限変更・停止不可（API側でも拒否される）
-  const [currentUid] = useState<string | null>(() =>
-    typeof window === "undefined" ? null : (firebaseClient().auth.currentUser?.uid ?? null),
-  );
+  // 購読で取得するため SSR・初回ハイドレーションは null で一致し、Auth 復元後に更新される
+  const [currentUid, setCurrentUid] = useState<string | null>(null);
+  useEffect(() => {
+    const client = firebaseClient();
+    return onIdTokenChanged(client.auth, (user) => setCurrentUid(user?.uid ?? null));
+  }, []);
 
-  const [data, setData] = useState<StaffListResponse | null>(null);
+  // facilityId とセットで保持し、施設切替直後に前施設の一覧が残らないようにする
+  const [data, setData] = useState<{ facilityId: string; res: StaffListResponse } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<{ kind: HxErrorKind; message: string } | null>(null);
   const reqSeqRef = useRef(0);
+
+  // 現在の施設のデータだけを表示対象にする（切替直後の前施設データを描画しない）
+  const list = data && data.facilityId === facilityId ? data.res : null;
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -96,7 +104,7 @@ export function StaffClient() {
       })
       .then((res) => {
         if (!res || reqId !== reqSeqRef.current) return;
-        setData(res);
+        setData({ facilityId, res });
         setRoleDrafts({});
       })
       .catch((err: unknown) => {
@@ -128,6 +136,12 @@ export function StaffClient() {
       setInviteRole("facility_staff");
       await load();
     } catch (err) {
+      if (err instanceof HxApiError && err.code === "REAUTH_REQUIRED") {
+        // 直近認証の期限切れ。再試行しても成功しないため再ログインへ誘導する
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+        window.location.assign("/api/session/logout");
+        return;
+      }
       setInviteError(
         err instanceof HxApiError && err.status === 409
           ? "このメールアドレスへの招待はすでに保留中です。"
@@ -160,6 +174,11 @@ export function StaffClient() {
       await load();
     } catch (err) {
       setPendingAction(null);
+      if (err instanceof HxApiError && err.code === "REAUTH_REQUIRED") {
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+        window.location.assign("/api/session/logout");
+        return;
+      }
       setActionError(err instanceof HxApiError ? err.message : "変更に失敗しました。もう一度お試しください。");
     } finally {
       setActionBusy(false);
@@ -204,7 +223,14 @@ export function StaffClient() {
       />
 
       <div className="flex justify-end">
-        <HxButton onClick={() => setInviteOpen(true)}>職員を招待する</HxButton>
+        <HxButton
+          onClick={() => {
+            setInviteError(null);
+            setInviteOpen(true);
+          }}
+        >
+          職員を招待する
+        </HxButton>
       </div>
 
       {actionError ? (
@@ -232,7 +258,7 @@ export function StaffClient() {
             onAction={error.kind === "forbidden" ? undefined : () => void load()}
           />
         )
-      ) : data === null && loading ? (
+      ) : list === null && loading ? (
         <HxDataTable caption="職員一覧を読み込み中" busy>
           <thead>
             <tr>
@@ -246,13 +272,13 @@ export function StaffClient() {
             <HxSkeletonRows rows={4} columns={4} />
           </tbody>
         </HxDataTable>
-      ) : data === null ? null : (
+      ) : list === null ? null : (
         <>
           <section aria-labelledby="members-heading" className="space-y-3">
             <h2 id="members-heading" className="text-hx-section-title font-semibold">
-              所属職員（{data.members.length}名）
+              所属職員（{list.members.length}名）
             </h2>
-            {data.members.length === 0 ? (
+            {list.members.length === 0 ? (
               <HxEmptyState icon="users" title="所属職員がいません" description="職員を招待してください。" />
             ) : (
               <HxDataTable caption="所属職員一覧" busy={loading}>
@@ -265,7 +291,7 @@ export function StaffClient() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.members.map((m) => {
+                  {list.members.map((m) => {
                     const draft = roleDrafts[m.membershipId] ?? m.role;
                     const isSelf = currentUid !== null && currentUid === m.userUid;
                     const canEdit = m.status === "active" && !isSelf;
@@ -342,9 +368,9 @@ export function StaffClient() {
 
           <section aria-labelledby="invitations-heading" className="space-y-3">
             <h2 id="invitations-heading" className="text-hx-section-title font-semibold">
-              保留中の招待（{data.invitations.length}件）
+              保留中の招待（{list.invitations.length}件）
             </h2>
-            {data.invitations.length === 0 ? (
+            {list.invitations.length === 0 ? (
               <p className="text-hx-body text-hx-text-subtle">保留中の招待はありません。</p>
             ) : (
               <HxDataTable caption="保留中の招待一覧">
@@ -356,7 +382,7 @@ export function StaffClient() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.invitations.map((inv) => (
+                  {list.invitations.map((inv) => (
                     <HxTr key={inv.invitationId}>
                       <HxTd>{inv.email}</HxTd>
                       <HxTd>{STAFF_ROLE_LABEL[inv.role]}</HxTd>
@@ -372,7 +398,14 @@ export function StaffClient() {
 
       <HxDialog
         open={inviteOpen}
-        onClose={inviteBusy ? () => undefined : () => setInviteOpen(false)}
+        onClose={
+          inviteBusy
+            ? () => undefined
+            : () => {
+                setInviteError(null);
+                setInviteOpen(false);
+              }
+        }
         title="職員を招待する"
         description="入力したメールアドレスへ招待を作成します。招待された職員が登録すると、この施設のメンバーとして追加されます。"
         footer={
@@ -380,8 +413,10 @@ export function StaffClient() {
             <HxButton
               variant="secondary"
               disabled={inviteBusy}
-              onClick={() => setInviteOpen(false)}
-              data-autofocus
+              onClick={() => {
+                setInviteError(null);
+                setInviteOpen(false);
+              }}
             >
               キャンセル
             </HxButton>
@@ -400,6 +435,7 @@ export function StaffClient() {
               onChange={(e) => setInviteEmail(e.target.value)}
               className={hxInputClass}
               autoComplete="off"
+              data-autofocus
             />
           </HxField>
           <HxField label="役割" required>
