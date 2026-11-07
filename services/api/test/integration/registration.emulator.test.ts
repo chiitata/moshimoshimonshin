@@ -187,7 +187,7 @@ describe("registerEmail / Auth・Firestore エミュレータ結合", () => {
     expect(opsAfter.docs[0]!.data().status).toBe("enabled");
   });
 
-  it("Firestore tx後のAuth有効化失敗→台帳failed→再開で収束・同意書は二重発行しない（失敗注入）", async () => {
+  it("Firestore tx後のAuth有効化失敗→台帳はconsents_committedで保護→再開で収束・同意書は二重発行しない（失敗注入）", async () => {
     // tx は成功させ、Auth updateUser のみ失敗させる
     deps.flakyAuthAdmin!.failNext.set("updateUser", 1);
     await expect(
@@ -199,7 +199,8 @@ describe("registerEmail / Auth・Firestore エミュレータ結合", () => {
     ).rejects.toMatchObject({ statusCode: 503 });
 
     const ops = await deps.firestore.collection("registrationOperations").get();
-    expect(ops.docs[0]!.data().status).toBe("failed");
+    // failed への巻き戻しはされず、コミット済み checkpoint が保護される
+    expect(ops.docs[0]!.data().status).toBe("consents_committed");
     const users = await deps.emulatorAuth!.listUsers();
     const uid = users.users[0]!.uid;
     // account+consents は commit 済みだが Auth は disabled のまま
@@ -223,8 +224,11 @@ describe("registerEmail / Auth・Firestore エミュレータ結合", () => {
     expect(consents.size).toBe(DEV_LEGAL_DOCUMENTS.requiredConsents.length);
   });
 
-  it("孤児Auth（disabled・accountなし）を回収して登録を修復する（registrationOperations修復）", async () => {
-    // 過去の失敗した登録の残骸: 同メールの disabled Auth ユーザー（account 無し）
+  it("別UIDのdisabled Authユーザー（孤児候補）は account 有無によらず削除せず 409", async () => {
+    // #170 で意図的に強化: disabled・account無しでも「他UID所有」を削除して
+    // 回収はしない（並走する別キー登録のユーザー誤削除を防ぐ）。
+    // 同一UID経路（同じ登録キーの再試行）は別テストで修復を確認済み。
+    // ※ 別キー再試行が詰むケースは #208 でフォローアップ。
     const orphan = await deps.emulatorAuth!.createUser({
       email: validBody.email,
       password: "old-password",
@@ -232,19 +236,18 @@ describe("registerEmail / Auth・Firestore エミュレータ結合", () => {
       disabled: true,
     });
 
-    const r = await registerEmail(deps, {
-      body: validBody,
-      idempotencyKey: "emu-key-1",
-      requestId: "req-1",
-    });
-    expect(r.registrationStatus).toBe("created");
+    await expect(
+      registerEmail(deps, {
+        body: validBody,
+        idempotencyKey: "emu-key-1",
+        requestId: "req-1",
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
 
-    // 孤児は削除され、新UIDのユーザーが有効
-    await expect(deps.emulatorAuth!.getUser(orphan.uid)).rejects.toThrow();
+    // 孤児候補は削除されず、新規Authユーザーも作られない
+    expect((await deps.emulatorAuth!.getUser(orphan.uid)).disabled).toBe(true);
     const users = await deps.emulatorAuth!.listUsers();
     expect(users.users).toHaveLength(1);
-    expect(users.users[0]!.disabled).toBe(false);
-    expect(users.users[0]!.uid).not.toBe(orphan.uid);
   });
 
   it("有効な既存ユーザーのメールは 409 で孤児も削除しない（email-already-exists）", async () => {
