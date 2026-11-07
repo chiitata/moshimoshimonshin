@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { HxStatusBadge, type HxDeliveryStatus } from "../../../components/design-system/hx-status-badge";
 import { HxDataTable, HxTd, HxTh, HxTr } from "../../../components/design-system/hx-data-table";
 import { HxButton } from "../../../components/design-system/hx-button";
-import { HxEmptyState, HxErrorPanel } from "../../../components/design-system/hx-feedback";
+import { HxEmptyState, HxErrorPanel, type HxErrorKind } from "../../../components/design-system/hx-feedback";
 import { hxInputClass } from "../../../components/design-system/hx-field";
 import { HxPageHeader } from "../../../components/design-system/hx-page-header";
 import { HxSkeletonRows } from "../../../components/design-system/hx-skeleton";
@@ -60,37 +60,57 @@ export function DeliveriesClient() {
   const [items, setItems] = useState<DeliveryListItem[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ kind: HxErrorKind; message: string } | null>(null);
   // 「次へ」は cursor を積み、「前へ」はスタックから1つ戻る
   const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [requestSeq, setRequestSeq] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
+  // 中断・差し替えられたリクエストが後発リクエストの loading/結果を
+  // 上書きしないよう、開始時刻の新しい要求だけが結果を適用する
+  const reqSeqRef = useRef(0);
 
   const currentCursor = cursorStack.length > 0 ? cursorStack[cursorStack.length - 1]! : null;
 
   const load = useCallback(
     (cursor: string | null, signal?: AbortSignal) => {
       if (!facilityId) return Promise.resolve();
-      setLoading(true);
-      setError(null);
+      const reqId = ++reqSeqRef.current;
       const params = new URLSearchParams();
       if (statusFilter) params.set("status", statusFilter);
       if (appliedQuery) params.set("q", appliedQuery);
       if (cursor) params.set("cursor", cursor);
-      return hxApi<DeliveryListResponse>(
-        `hospitals/${encodeURIComponent(facilityId)}/deliveries?${params.toString()}`,
-        { signal },
-      )
+      const url = `hospitals/${encodeURIComponent(facilityId)}/deliveries?${params.toString()}`;
+      // setState はコールバック内でのみ行う（effect からの直接呼出でも同期setStateにならない）
+      return Promise.resolve()
+        .then(() => {
+          if (reqId !== reqSeqRef.current) return undefined;
+          setLoading(true);
+          setError(null);
+          return hxApi<DeliveryListResponse>(url, { signal });
+        })
         .then((data) => {
+          if (!data || reqId !== reqSeqRef.current) return;
           setItems(data.deliveries);
           setNextCursor(data.nextCursor);
         })
         .catch((err: unknown) => {
+          if (reqId !== reqSeqRef.current) return;
           if (err instanceof DOMException && err.name === "AbortError") return;
           setItems(null);
-          setError(err instanceof HxApiError ? err.message : "読み込みに失敗しました。");
+          const message = err instanceof HxApiError ? err.message : "読み込みに失敗しました。";
+          const kind: HxErrorKind =
+            err instanceof HxApiError && err.status === 401
+              ? "session"
+              : err instanceof HxApiError && err.status === 403
+                ? "forbidden"
+                : err instanceof HxApiError && err.status === 0
+                  ? "offline"
+                  : "error";
+          setError({ kind, message });
         })
-        .finally(() => setLoading(false));
+        .finally(() => {
+          if (reqId === reqSeqRef.current) setLoading(false);
+        });
     },
     [facilityId, statusFilter, appliedQuery],
   );
@@ -158,7 +178,7 @@ export function DeliveriesClient() {
         description={`${selected.facility?.displayName ?? "選択中の施設"}に届いた問診票の一覧です。`}
       />
 
-      <form onSubmit={applySearch} className="flex flex-wrap items-end gap-3" aria-label="受信問診の絞り込み">
+      <form onSubmit={applySearch} role="search" className="flex flex-wrap items-end gap-3" aria-label="受信問診の絞り込み">
         <div className="min-w-56 flex-1">
           <label htmlFor="delivery-q" className="mb-1.5 block text-hx-label font-semibold text-hx-text">
             患者氏名で検索
@@ -202,16 +222,40 @@ export function DeliveriesClient() {
       </form>
 
       {error ? (
-        <HxErrorPanel
-          title="受信問診を読み込めませんでした"
-          description={error}
-          actionLabel="再試行"
-          onAction={() => void load(currentCursor, abortRef.current?.signal)}
-        />
+        error.kind === "session" ? (
+          <HxErrorPanel
+            kind="session"
+            description={error.message}
+            // セッション切れはフルナビゲーションでReact状態（一覧内容）を確実に破棄する
+            // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+            onAction={() => window.location.assign("/login")}
+          />
+        ) : (
+          <HxErrorPanel
+            kind={error.kind}
+            title={error.kind === "error" || error.kind === "offline" ? "受信問診を読み込めませんでした" : undefined}
+            description={error.kind === "forbidden" ? undefined : error.message}
+            onAction={
+              error.kind === "forbidden"
+                ? undefined
+                : () => void load(currentCursor, abortRef.current?.signal)
+            }
+          />
+        )
       ) : items === null ? (
-        <div role="status" aria-label="読み込み中">
-          <HxSkeletonRows rows={8} />
-        </div>
+        <HxDataTable caption="受信問診一覧" busy>
+          <thead>
+            <tr>
+              <HxTh>受信日時</HxTh>
+              <HxTh>患者氏名</HxTh>
+              <HxTh>状態</HxTh>
+              <HxTh>問診票ID</HxTh>
+            </tr>
+          </thead>
+          <tbody>
+            <HxSkeletonRows rows={8} columns={4} />
+          </tbody>
+        </HxDataTable>
       ) : items.length === 0 ? (
         <HxEmptyState
           icon="inbox"
@@ -257,6 +301,7 @@ export function DeliveriesClient() {
           <div className="flex items-center justify-between">
             <p className="text-hx-caption text-hx-text-subtle" aria-live="polite">
               {items.length}件表示{cursorStack.length > 0 ? `（${cursorStack.length + 1}ページ目）` : ""}
+              {appliedQuery ? "・氏名順" : "・受信日時順"}
             </p>
             <div className="flex gap-2">
               <HxButton
