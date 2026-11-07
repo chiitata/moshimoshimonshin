@@ -50,6 +50,7 @@ export interface DeliveryListItem {
   questionnaireId: string;
   questionnaireRevisionId: string;
   status: DeliveryDoc["status"];
+  patientDisplayName: string | null;
   createdAt: unknown;
   deliveredAt: unknown;
   acknowledgedAt: unknown;
@@ -63,11 +64,18 @@ export interface DeliveryListResult {
 /**
  * 施設の受信一覧（receivedAt=deliveredAt 降順、自院スコープ、20件カーソルページング）。
  * senderUid は一覧に含めない（03_機能仕様書 §3.8）。
+ * 絞り込み・検索はサーバ側のみで行い、全件をクライアントへ送らない（H-003 検索制限）。
  */
 export async function listDeliveriesByFacility(
   db: FirestoreLike,
   facilityId: string,
-  opts?: { cursor?: string; limit?: number },
+  opts?: {
+    cursor?: string;
+    limit?: number;
+    status?: DeliveryDoc["status"];
+    /** 患者表示名の前方一致（自院スコープ内のみ） */
+    q?: string;
+  },
 ): Promise<DeliveryListResult> {
   const pageSize = opts?.limit ?? 20;
 
@@ -90,15 +98,36 @@ export async function listDeliveriesByFacility(
     startAfterDoc = curSnap;
   }
 
+  const filters: Array<{ field: string; op: "==" | ">=" | "<=" | "<"; value: unknown }> = [
+    { field: "facilityId", op: "==", value: facilityId },
+  ];
+  if (opts?.status) filters.push({ field: "status", op: "==", value: opts.status });
+
+  // 名前検索は表示名の範囲クエリ（前方一致）で、順序は deliveredAt から
+  // patientDisplayName へ切り替える（別複合索引）。
+  const q = opts?.q && opts.q.length > 0 ? opts.q : null;
+  const orderBy = q
+    ? [
+        { field: "patientDisplayName", direction: "asc" as const },
+        { field: "deliveredAt", direction: "desc" as const },
+      ]
+    : [
+        { field: "deliveredAt", direction: "desc" as const },
+        { field: "createdAt", direction: "desc" as const },
+      ];
+  if (q) {
+    filters.push(
+      { field: "patientDisplayName", op: ">=", value: q },
+      { field: "patientDisplayName", op: "<", value: `${q}\uf8ff` },
+    );
+  }
+
   const rows = await queryDocs<DeliveryDoc>(
     db,
     "deliveries",
-    [{ field: "facilityId", op: "==", value: facilityId }],
+    filters,
     {
-      orderBy: [
-        { field: "deliveredAt", direction: "desc" },
-        { field: "createdAt", direction: "desc" },
-      ],
+      orderBy,
       ...(startAfterDoc ? { startAfterDoc } : {}),
       limit: pageSize + 1,
     },
@@ -118,6 +147,7 @@ export async function listDeliveriesByFacility(
       questionnaireId: r.data.questionnaireId,
       questionnaireRevisionId: r.data.questionnaireRevisionId,
       status: r.data.status,
+      patientDisplayName: r.data.patientDisplayName ?? null,
       createdAt: r.data.createdAt,
       deliveredAt: r.data.deliveredAt ?? null,
       acknowledgedAt: r.data.acknowledgedAt ?? null,
