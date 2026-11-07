@@ -18,10 +18,10 @@ Node.js 22 以降で `npm ci`、`npm run dev` を実行し、http://localhost:30
 
 ## 職員認証・セッション（H-001）
 
-- `/login` で Firebase Auth（メール/パスワード）にサインインし、MFA 未登録なら TOTP 登録、登録済みなら TOTP 検証を経て、`POST /api/session` が実 API で credential を検証してから HttpOnly Cookie（本番 `__Host-mmr-session`、SameSite=Strict、最長55分）を発行します。失敗してもアカウントの存在有無を示さない応答にします。
-- 業務画面は `app/(workspace)/layout.tsx` がセッション Cookie と `GET /v1/me/facility-memberships` で検証し、Cookie があっても API が拒否すれば `/login` へ戻ります。`proxy.ts` は Cookie の有無だけの楽観的リダイレクトで、認可の正本は API 側です。
+- `/login` で Firebase Auth（メール/パスワード）にサインインし、MFA 未登録なら TOTP 登録、登録済みなら TOTP 検証を経て、`POST /api/session` が実 API で credential を検証し（本番ではMFAクレームも確認）、HttpOnly Cookie（本番 `__Host-mmr-session`、SameSite=Strict、最長55分）を発行します。失敗してもアカウントの存在有無を示さない応答にします。
+- 業務画面は `app/(workspace)/layout.tsx` がセッション Cookie と `GET /v1/me/facility-memberships` で検証します。401/403 なら `GET /api/session/logout` で Cookie を消して `/login` へ、5xx・接続失敗ではセッションを維持したまま再試行可能なエラー画面を出します。`proxy.ts` は Cookie の有無だけの楽観的リダイレクトで、認可の正本は API 側です。
 - クライアントの API 呼び出しは `lib/hx-api.ts` 経由で `/api/hx/*` のみを使い、サーバ側が Bearer + App Check を付けて転送します。`/api/session` と `/api/hx/*` は必須カスタムヘッダー `x-hx-client: portal`・`Sec-Fetch-Site`/`Origin` の同一オリジン確認で CSRF を防ぎます。
-- セッション維持は `workspace-shell.tsx` の `SessionKeeper` が Firebase の ID トークン変更・定期更新・タブ復帰を監視して行います。サインアウト時は `DELETE /api/session` で Cookie を削除します。
+- セッション維持は `workspace-shell.tsx` の `SessionKeeper` が Firebase の ID トークン変更・定期更新・タブ復帰を監視して行います。サインアウト・失効・再読み込み後の未認証では `GET /api/session/logout` 経由で Cookie を削除して `/login` に戻ります（Firebase はインメモリ永続化のため再読み込みは再ログイン）。
 
 `lib/firebase-demo.ts` は将来のデモ向けの明示的な初期化関数です。`NEXT_PUBLIC_FIREBASE_PROJECT_ID=demo-mmr-dev`、`NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true` と Compose が指定する localhost の Auth / Firestore / Storage エミュレータのアドレスがすべて必要で、異なる設定は拒否します。この旧ヘルパーは既存のSDK結合試験用です。業務画面は `lib/firebase-client.ts` のAuth＋APIクライアントを利用し、Firestoreから業務データを直接取得しません。
 
@@ -99,9 +99,10 @@ Next.js ProxyのCSPは同じ接続設定から許可先を生成します。配�
 画面はメール/パスワードと登録済みTOTPの追加認証に対応します。TOTP以外のMFAは未対応です。
 職員画面は HttpOnly Cookie セッション＋`/api/hx/*` BFF 経由で API を呼び、ID トークンを
 ブラウザ JS・localStorage に置きません（ADR-0020）。運営画面の既存経路はトークンをメモリ内に
-保持する方式のままです。リロード時はセッション Cookie があれば再確立され、なければ再ログインに
-なります。本番でMFA済みtokenがなければAPI呼び出し・Cookie 発行を止めますが、これはUX上の
-追加チェックであり、サーバ側のMFA強制・運営権限の認可を代替しません。
+保持する方式のままです。Firebase Auth はインメモリ永続化のため、ブラウザの再読み込みでは
+Firebase 側の認証状態が消え、Cookie も消去して再ログインになります。
+本番では `/api/session` 側でもMFA済みトークンのクレームを確認し、未MFAの Cookie 発行を
+拒否します（サーバ側のMFA強制・運営権限の認可は引き続きBEが担います）。
 権限はBEがfacilityMemberships正本で判定します。
 MFA登録は初回ログイン時の画面で行います。他の運営機能は完成扱いにしません。
 APIエラー本文やtokenはログへ出さず、レスポンスはAPI-038の公開フィールドだけを画面へ渡します。

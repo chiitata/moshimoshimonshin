@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { validateClientConfig, type ClientConfigInput } from "./lib/client-config";
+import { PATHNAME_HEADER, SESSION_COOKIE_DEV, SESSION_COOKIE_PROD } from "./lib/session-shared";
 
 function serviceSources(input: ClientConfigInput) {
   try {
@@ -49,9 +50,6 @@ export function securityHeaders(nonce: string, development: boolean, input: Clie
   };
 }
 
-const SESSION_COOKIE_PROD = "__Host-mmr-session";
-const SESSION_COOKIE_DEV = "mmr-session";
-
 /** (workspace) グループ配下の業務ページ。セッションCookieの有無で楽観的に振り分ける。 */
 const PROTECTED_PREFIXES = ["/facilities", "/deliveries", "/staff", "/settings"];
 
@@ -73,27 +71,30 @@ export function proxy(request: NextRequest) {
     appCheckSiteKey: process.env.NEXT_PUBLIC_APP_CHECK_SITE_KEY,
     authEmulatorUrl: process.env.NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_URL,
   });
-  const requestHeaders = new Headers(request.headers);
-  // Overwrite untrusted client headers before Next.js extracts the script nonce.
-  requestHeaders.set("x-nonce", nonce);
-  requestHeaders.set("Content-Security-Policy", headers["Content-Security-Policy"]);
-
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
   const hasSession =
     request.cookies.has(SESSION_COOKIE_PROD) || request.cookies.has(SESSION_COOKIE_DEV);
   const isProtected = PROTECTED_PREFIXES.some(
     (p) => pathname === p || pathname.startsWith(`${p}/`),
   );
 
+  // レイアウトが next パラメータ復元に使う内部ヘッダーとCSP nonceを常時付与する
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set(PATHNAME_HEADER, `${pathname}${search}`);
+  // Overwrite untrusted client headers before Next.js extracts the script nonce.
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("Content-Security-Policy", headers["Content-Security-Policy"]);
+  const pass = () => NextResponse.next({ request: { headers: requestHeaders } });
+
   let response: NextResponse;
   if (isProtected && !hasSession) {
     const url = new URL("/login", request.url);
-    if (pathname !== "/") url.searchParams.set("next", pathname);
+    url.searchParams.set("next", `${pathname}${search}`);
     response = NextResponse.redirect(url);
   } else if (pathname === "/login" && hasSession) {
     response = NextResponse.redirect(new URL("/facilities", request.url));
   } else {
-    response = NextResponse.next({ request: { headers: requestHeaders } });
+    response = pass();
   }
   for (const [key, value] of Object.entries(headers)) response.headers.set(key, value);
   return response;

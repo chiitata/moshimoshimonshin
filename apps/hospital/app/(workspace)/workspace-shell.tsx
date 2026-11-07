@@ -8,6 +8,13 @@ import { firebaseClient } from "../../lib/firebase-client";
 import { destroySession, establishSession } from "../../lib/staff-session";
 import type { StaffMembership } from "../../lib/memberships";
 
+/** Cookie 消去込みでログイン画面へ戻す（再読み込み後のFirebase未認証を含む）。 */
+function toLogout(pathname: string) {
+  const next = pathname && pathname !== "/" ? `?next=${encodeURIComponent(pathname)}` : "";
+  // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- Cookie消去はRoute Handler側で行う必要がある
+  location.assign(`/api/session/logout${next}`);
+}
+
 const MembershipsContext = createContext<StaffMembership[]>([]);
 
 export function useMemberships(): StaffMembership[] {
@@ -32,12 +39,11 @@ function SessionKeeper({
 }) {
   useEffect(() => {
     const client = firebaseClient();
-    // Firebase サインイン状態が切れたら Cookie も消して H-001 へ戻す
+    // Firebase サインイン状態が切れたら（失効・再読み込みでメモリ消失）Cookie も消して
+    // H-001 へ戻す。inMemoryPersistence のためブラウザ再読み込みは再ログインになる。
     const unsubscribe = onIdTokenChanged(client.auth, (user) => {
       onUserChange(user?.displayName ?? user?.email ?? null);
-      if (!user) {
-        void destroySession().then(() => goLogin(pathname));
-      }
+      if (!user) toLogout(pathname);
     });
     const renew = () => {
       if (client.auth.currentUser) void establishSession();

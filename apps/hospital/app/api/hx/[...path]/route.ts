@@ -1,4 +1,4 @@
-import type { NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import {
   assertPortalClient,
   portalJson,
@@ -24,7 +24,8 @@ async function proxy(req: NextRequest, params: Params["params"], method: string)
   if (path.length === 0 || path.some((seg) => !seg || seg === ".." || seg.includes("/"))) {
     return portalJson({ error: "bad_request" }, { status: 400 });
   }
-  const target = `/v1/${path.map(encodeURIComponent).join("/")}${req.nextUrl.search}`;
+  // apiBaseUrl 自体が /v1 で終わるため、ここでは付けない
+  const target = `/${path.map(encodeURIComponent).join("/")}${req.nextUrl.search}`;
 
   let body: unknown;
   if (method !== "GET" && method !== "DELETE") {
@@ -43,9 +44,15 @@ async function proxy(req: NextRequest, params: Params["params"], method: string)
   }).catch(() => null);
   if (!upstream) return portalJson({ error: "service_unavailable" }, { status: 503 });
 
-  const contentType = upstream.headers.get("content-type") ?? "";
+  // 204 などの空ボディ成功はそのまま返す（成功を失敗化しない）
   const text = await upstream.text();
-  if (!contentType.includes("application/json") || text === "") {
+  if (upstream.status === 204 || text === "") {
+    const res = new NextResponse(null, { status: upstream.status });
+    res.headers.set("cache-control", "no-store");
+    return res;
+  }
+  const contentType = upstream.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
     return portalJson({ error: "upstream_error" }, { status: 502 });
   }
   try {

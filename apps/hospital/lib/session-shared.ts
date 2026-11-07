@@ -5,6 +5,9 @@ import { clientConfig } from "./client-config";
 export const PORTAL_CLIENT_HEADER = "x-hx-client";
 const PORTAL_CLIENT_VALUE = "portal";
 
+/** Proxy が付与し RSC レイアウトが読む内部パス名ヘッダー（next 復元用）。 */
+export const PATHNAME_HEADER = "x-hx-pathname";
+
 export const SESSION_COOKIE_PROD = "__Host-mmr-session";
 export const SESSION_COOKIE_DEV = "mmr-session";
 export const APPCHECK_COOKIE_PROD = "__Host-mmr-appcheck";

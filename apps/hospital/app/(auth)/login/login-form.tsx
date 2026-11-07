@@ -236,25 +236,25 @@ export function LoginForm({ next }: { next: string }) {
           data-autofocus
         />
       </HxField>
-      <HxField label="パスワード" required>
-        <div className="relative">
+      <div className="relative">
+        <HxField label="パスワード" required>
           <input
             name="password"
             type={showPassword ? "text" : "password"}
             autoComplete="current-password"
             className={`${hxInputClass} pr-16`}
           />
-          <button
-            type="button"
-            aria-pressed={showPassword}
-            onClick={() => setShowPassword((v) => !v)}
-            className="absolute inset-y-0 right-0 inline-flex items-center gap-1 px-3 text-hx-caption font-semibold text-hx-primary"
-          >
-            <HxIcon name={showPassword ? "x" : "search"} size={14} />
-            {showPassword ? "隠す" : "表示"}
-          </button>
-        </div>
-      </HxField>
+        </HxField>
+        <button
+          type="button"
+          aria-pressed={showPassword}
+          onClick={() => setShowPassword((v) => !v)}
+          className="absolute bottom-1.5 right-1.5 inline-flex items-center gap-1 rounded-sm px-2 py-1 text-hx-caption font-semibold text-hx-primary"
+        >
+          <HxIcon name={showPassword ? "x" : "search"} size={14} />
+          {showPassword ? "隠す" : "表示"}
+        </button>
+      </div>
       {message ? <p role="alert" className="text-hx-caption font-semibold text-hx-danger">{message}</p> : null}
       {resetSent ? (
         <p role="status" className="text-hx-caption text-hx-text-subtle">

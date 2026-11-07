@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { clientConfig } from "../../../lib/client-config";
 import {
   assertPortalClient,
   clearSession,
@@ -22,17 +23,20 @@ export async function POST(req: NextRequest) {
   } catch {
     return portalJson({ error: "bad_request" }, { status: 400 });
   }
-  if (typeof body.idToken !== "string" || body.idToken.length === 0 || body.idToken.length > 8192) {
+  // IDトークンはCookie容量の上限より小さいことを要求（ブラウザが超過Cookieを黙って捨てるため）
+  if (typeof body.idToken !== "string" || body.idToken.length === 0 || body.idToken.length > 4096) {
     return portalJson({ error: "bad_request" }, { status: 400 });
   }
   const appCheckToken =
-    typeof body.appCheckToken === "string" && body.appCheckToken.length > 0
+    typeof body.appCheckToken === "string" &&
+    body.appCheckToken.length > 0 &&
+    body.appCheckToken.length <= 4096
       ? body.appCheckToken
       : null;
 
   const upstream = await sessionApiFetch(
     { idToken: body.idToken, appCheckToken },
-    "/v1/me/facility-memberships",
+    "/me/facility-memberships",
   ).catch(() => null);
   if (!upstream) {
     return portalJson({ error: "service_unavailable" }, { status: 503 });
@@ -41,8 +45,32 @@ export async function POST(req: NextRequest) {
     return portalJson({ error: "unauthenticated" }, { status: 401 });
   }
 
+  if (!clientConfig().emulator) {
+    // 職員セッションはMFA済みトークンのみ許可（NFR-05）。署名は直前のAPI検証済みのため
+    // ここではクレームの存在のみ確認する。
+    if (!hasSecondFactorClaim(body.idToken)) {
+      return portalJson({ error: "mfa_required" }, { status: 401 });
+    }
+  }
+
   await writeSession({ idToken: body.idToken, appCheckToken });
-  return portalJson(await upstream.json());
+  try {
+    return portalJson(await upstream.json());
+  } catch {
+    return portalJson({ error: "upstream_error" }, { status: 502 });
+  }
+}
+
+/** APIが署名検証したIDトークンのMFAクレーム確認（署名は再検証しない）。 */
+function hasSecondFactorClaim(idToken: string): boolean {
+  try {
+    const payload = JSON.parse(atob(idToken.split(".")[1])) as {
+      firebase?: { sign_in_second_factor?: string };
+    };
+    return typeof payload.firebase?.sign_in_second_factor === "string";
+  } catch {
+    return false;
+  }
 }
 
 /** DELETE /api/session — ログアウト。Cookie を完全に消去する。 */
