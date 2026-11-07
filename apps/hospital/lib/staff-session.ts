@@ -8,7 +8,8 @@ export async function establishSession(): Promise<boolean> {
   if (!user) return false;
   if (!clientConfig().emulator) {
     // 職員の本番認証はMFA済みトークンのみ許可（NFR-05）。credential をCookieにしない。
-    const result = await user.getIdTokenResult();
+    // MFA登録直後も最新クレームを得るため強制リフレッシュする。
+    const result = await user.getIdTokenResult(true);
     if (!(result.claims.firebase as { sign_in_second_factor?: string } | undefined)
       ?.sign_in_second_factor) {
       return false;

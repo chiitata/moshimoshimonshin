@@ -1,7 +1,14 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { clientConfig } from "./client-config";
-import { appCheckCookieName, sessionCookieName } from "./session-shared";
+import {
+  appCheckCookieName,
+  APPCHECK_COOKIE_DEV,
+  APPCHECK_COOKIE_PROD,
+  sessionCookieName,
+  SESSION_COOKIE_DEV,
+  SESSION_COOKIE_PROD,
+} from "./session-shared";
 
 export {
   assertPortalClient,
@@ -51,13 +58,22 @@ export async function writeSession(session: StaffSession): Promise<void> {
   jar.set(sessionCookieName(), session.idToken, cookieOptions());
   if (session.appCheckToken) {
     jar.set(appCheckCookieName(), session.appCheckToken, cookieOptions());
+  } else {
+    jar.delete(appCheckCookieName());
   }
 }
 
 export async function clearSession(): Promise<void> {
   const jar = await cookies();
-  jar.delete(sessionCookieName());
-  jar.delete(appCheckCookieName());
+  // 環境名の違いで残った旧Cookieも確実に消す（ガードループ防止）
+  for (const name of [
+    SESSION_COOKIE_PROD,
+    SESSION_COOKIE_DEV,
+    APPCHECK_COOKIE_PROD,
+    APPCHECK_COOKIE_DEV,
+  ]) {
+    jar.delete(name);
+  }
 }
 
 /**

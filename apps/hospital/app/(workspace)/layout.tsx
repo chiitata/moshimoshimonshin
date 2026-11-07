@@ -39,10 +39,17 @@ function UpstreamError({
  */
 export default async function WorkspaceLayout({ children }: { children: React.ReactNode }) {
   const session = await readSession();
-  if (!session) redirect("/login");
+  if (!session) {
+    // 無効・空値などの残留Cookieも消してからログインへ戻す
+    redirect("/api/session/logout");
+  }
 
-  const currentPath =
-    (await headers()).get(PATHNAME_HEADER)?.split("?")[0] ?? "/facilities";
+  // RSC データ要求に付く _rsc パラメータだけを落として元URLを復元する
+  const rawPath = (await headers()).get(PATHNAME_HEADER) ?? "/facilities";
+  const retryParams = new URLSearchParams(rawPath.split("?")[1] ?? "");
+  retryParams.delete("_rsc");
+  const query = retryParams.toString();
+  const currentPath = `${rawPath.split("?")[0]}${query ? `?${query}` : ""}`;
 
   const upstream = await sessionApiFetch(session, "/me/facility-memberships").catch(
     () => null,
@@ -71,6 +78,21 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
     );
   }
 
-  const memberships = (await upstream.json()) as MembershipsResponse;
+  let memberships: MembershipsResponse;
+  try {
+    const data: unknown = await upstream.json();
+    if (!data || typeof data !== "object" || !Array.isArray((data as MembershipsResponse).items)) {
+      throw new Error("unexpected shape");
+    }
+    memberships = data as MembershipsResponse;
+  } catch {
+    return (
+      <UpstreamError
+        title="読み込みに失敗しました"
+        description="サーバ応答を処理できませんでした。時間をおいて再試行してください。"
+        retryHref={currentPath}
+      />
+    );
+  }
   return <WorkspaceShell memberships={memberships.items}>{children}</WorkspaceShell>;
 }

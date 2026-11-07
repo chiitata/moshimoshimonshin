@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { validateClientConfig, type ClientConfigInput } from "./lib/client-config";
-import { PATHNAME_HEADER, SESSION_COOKIE_DEV, SESSION_COOKIE_PROD } from "./lib/session-shared";
+import { PATHNAME_HEADER, sessionCookieName } from "./lib/session-shared";
 
 function serviceSources(input: ClientConfigInput) {
   try {
@@ -72,8 +72,8 @@ export function proxy(request: NextRequest) {
     authEmulatorUrl: process.env.NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_URL,
   });
   const { pathname, search } = request.nextUrl;
-  const hasSession =
-    request.cookies.has(SESSION_COOKIE_PROD) || request.cookies.has(SESSION_COOKIE_DEV);
+  // 環境で有効なCookie名・非空値だけを見る（旧名・空値の残留Cookieによるガードループを防ぐ）
+  const hasSession = Boolean(request.cookies.get(sessionCookieName())?.value);
   const isProtected = PROTECTED_PREFIXES.some(
     (p) => pathname === p || pathname.startsWith(`${p}/`),
   );

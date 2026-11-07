@@ -41,8 +41,11 @@ export async function POST(req: NextRequest) {
   if (!upstream) {
     return portalJson({ error: "service_unavailable" }, { status: 503 });
   }
-  if (!upstream.ok) {
+  if (upstream.status === 401 || upstream.status === 403) {
     return portalJson({ error: "unauthenticated" }, { status: 401 });
+  }
+  if (!upstream.ok) {
+    return portalJson({ error: "upstream_error" }, { status: 502 });
   }
 
   if (!clientConfig().emulator) {
@@ -64,9 +67,10 @@ export async function POST(req: NextRequest) {
 /** APIが署名検証したIDトークンのMFAクレーム確認（署名は再検証しない）。 */
 function hasSecondFactorClaim(idToken: string): boolean {
   try {
-    const payload = JSON.parse(atob(idToken.split(".")[1])) as {
-      firebase?: { sign_in_second_factor?: string };
-    };
+    // JWT は base64url エンコード（-/_ を含み atob ではデコードできない）
+    const payload = JSON.parse(
+      Buffer.from(idToken.split(".")[1], "base64url").toString("utf8"),
+    ) as { firebase?: { sign_in_second_factor?: string } };
     return typeof payload.firebase?.sign_in_second_factor === "string";
   } catch {
     return false;

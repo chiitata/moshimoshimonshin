@@ -14,6 +14,13 @@ const VERIFICATION_LABEL = {
   suspended: { label: "利用停止", tone: "warning" },
 } as const;
 
+function verificationOf(facility: { verificationStatus: string }) {
+  return (
+    VERIFICATION_LABEL[facility.verificationStatus as keyof typeof VERIFICATION_LABEL] ??
+    ({ label: "不明", tone: "neutral" } as const)
+  );
+}
+
 export function FacilitiesClient() {
   const memberships = useMemberships();
 
@@ -46,11 +53,13 @@ export function FacilitiesClient() {
                     {m.facility.addressFormatted}
                   </p>
                 ) : null}
-                <p className="text-hx-caption text-hx-text-subtle">役割：{STAFF_ROLE_LABEL[m.role]}</p>
+                <p className="text-hx-caption text-hx-text-subtle">
+                  役割：{STAFF_ROLE_LABEL[m.role] ?? "不明"}
+                </p>
               </div>
               {m.facility ? (
-                <HxBadge tone={VERIFICATION_LABEL[m.facility.verificationStatus].tone}>
-                  {VERIFICATION_LABEL[m.facility.verificationStatus].label}
+                <HxBadge tone={verificationOf(m.facility).tone}>
+                  {verificationOf(m.facility).label}
                 </HxBadge>
               ) : null}
             </li>

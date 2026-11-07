@@ -46,7 +46,9 @@ function SessionKeeper({
       if (!user) toLogout(pathname);
     });
     const renew = () => {
-      if (client.auth.currentUser) void establishSession();
+      if (client.auth.currentUser) {
+        void establishSession().catch(() => undefined);
+      }
     };
     const interval = setInterval(renew, RENEW_INTERVAL_MS);
     const onVisible = () => {

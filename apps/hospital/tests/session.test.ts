@@ -8,10 +8,11 @@ import {
 } from "../lib/session-shared";
 import { proxy } from "../proxy";
 
-process.env.NEXT_PUBLIC_HOSPITAL_EMULATOR ??= "true";
-process.env.NEXT_PUBLIC_HOSPITAL_PROJECT_ID ??= "demo-mmr-dev";
-process.env.NEXT_PUBLIC_HOSPITAL_API_BASE_URL ??= "http://localhost:8080/v1";
-process.env.NEXT_PUBLIC_HOSPITAL_AUTH_EMULATOR_URL ??= "http://localhost:9099";
+// テスト実行時に clientConfig() が読む環境変数（Emulator向けの明示設定）
+process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR ??= "true";
+process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ??= "demo-mmr-dev";
+process.env.NEXT_PUBLIC_API_BASE_URL ??= "http://localhost:8080/v1";
+process.env.NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_URL ??= "http://localhost:9099";
 
 function request(
   url: string,
@@ -75,7 +76,7 @@ test("proxy: 未ログインで業務画面へ行くと /login?next= へ戻さ�
 test("proxy: セッションCookieがあれば業務画面を通し、/login では /facilities へ進める", () => {
   const authed = proxy(request("http://localhost:3000/facilities", {}, { "mmr-session": "token" }));
   assert.equal(authed.headers.get("location"), null);
-  const login = proxy(request("http://localhost:3000/login", {}, { "__Host-mmr-session": "token" }));
+  const login = proxy(request("http://localhost:3000/login", {}, { "mmr-session": "token" }));
   assert.equal(new URL(login.headers.get("location")!).pathname, "/facilities");
 });
 
