@@ -185,13 +185,21 @@ export async function registerEmail(
     // ---- Firestore transaction: account + legalConsents + operation ----
     // 操作台帳の状態更新も同一tx内で行う。tx後に失敗すると台帳が
     // auth_created のまま残り、同一キー再試行で同意書が二重発行されるのを防ぐ。
+    // 再開時は台帳 status が failed/期限切れ上書き等で進捗を失い得るため、
+    // 同意書の実在でも二重発行を防ぐ（本 uid 由来の同意書はこの登録経路
+    // だけが作る）。
     if (operation.status === "auth_created" || operation.status === "reserved") {
       await deps.db.runTransaction(async (tx) => {
         const opRef = registrationOperationRef(deps.db, operationHash);
         const accountRef = deps.db.doc(`accounts/${operation!.uid}`);
-        const [opSnap, accountSnap] = await Promise.all([
+        const [opSnap, accountSnap, consentsSnap] = await Promise.all([
           tx.get(opRef),
           tx.get(accountRef),
+          tx.get(
+            deps.db
+              .collection("legalConsents")
+              .where("subjectUid", "==", operation!.uid),
+          ),
         ]);
         const committedStatus = (
           opSnap.data() as RegistrationOperationDoc | undefined
@@ -219,7 +227,15 @@ export async function registerEmail(
             account as unknown as DocumentData,
           );
         }
-        writeConsentDocs(tx, deps, operation!.uid, grants, "email_registration");
+        if (consentsSnap.empty) {
+          writeConsentDocs(
+            tx,
+            deps,
+            operation!.uid,
+            grants,
+            "email_registration",
+          );
+        }
         tx.set(
           opRef,
           { status: "consents_committed", updatedAt: ts } as DocumentData,
