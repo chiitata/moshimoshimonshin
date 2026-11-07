@@ -10,5 +10,6 @@ export default async function DeliveryDetailPage({
   params: Promise<{ deliveryId: string }>;
 }) {
   const { deliveryId } = await params;
-  return <DeliveryDetailClient deliveryId={deliveryId} />;
+  // 別票へのクライアント側遷移で前患者のPHIが残らないよう key で確実に再マウントする
+  return <DeliveryDetailClient key={deliveryId} deliveryId={deliveryId} />;
 }

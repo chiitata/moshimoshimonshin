@@ -21,7 +21,8 @@ interface SummarySection {
 
 interface QuestionnaireSnapshot {
   schemaVersion?: string;
-  chiefComplaint?: { value: string | null; source?: string };
+  /** 契約は {value} だが、旧データの生文字列も安全側で受ける */
+  chiefComplaint?: { value: string | null; source?: string } | string;
   sections?: Record<string, SummarySection>;
   bodyLocations?: string[];
   medicationSnapshots?: Array<{ medicationId: string; displayName: string; confirmed: true }>;
@@ -128,6 +129,7 @@ export function DeliveryDetailClient({ deliveryId }: { deliveryId: string }) {
   const [ackBusy, setAckBusy] = useState(false);
   const [ackError, setAckError] = useState<string | null>(null);
   const reqSeqRef = useRef(0);
+  const statusRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(() => {
     if (!facilityId) return Promise.resolve();
@@ -143,6 +145,7 @@ export function DeliveryDetailClient({ deliveryId }: { deliveryId: string }) {
       .then((data) => {
         if (!data || reqId !== reqSeqRef.current) return;
         setDetail(data);
+        setAckError(null);
       })
       .catch((err: unknown) => {
         if (reqId !== reqSeqRef.current) return;
@@ -170,7 +173,9 @@ export function DeliveryDetailClient({ deliveryId }: { deliveryId: string }) {
   }, [load]);
 
   async function acknowledge() {
-    if (!facilityId || !detail) return;
+    if (!facilityId || !detail || ackBusy) return;
+    // 先行する load() の結果で acknowledged 状態を巻き戻さないよう要求世代を進める
+    reqSeqRef.current += 1;
     setAckBusy(true);
     setAckError(null);
     try {
@@ -180,9 +185,16 @@ export function DeliveryDetailClient({ deliveryId }: { deliveryId: string }) {
       );
       setDetail({ ...detail, status: res.status, acknowledgedAt: res.acknowledgedAt });
       setConfirmOpen(false);
+      statusRef.current?.focus();
     } catch (err) {
       setConfirmOpen(false);
-      setAckError(err instanceof HxApiError ? err.message : "受領確認に失敗しました。もう一度お試しください。");
+      setAckError(
+        err instanceof HxApiError && err.status === 409
+          ? "この問診票は現在の状態では受領確認できません。一覧を再読み込みして状態を確認してください。"
+          : err instanceof HxApiError
+            ? err.message
+            : "受領確認に失敗しました。もう一度お試しください。",
+      );
     } finally {
       setAckBusy(false);
     }
@@ -233,9 +245,9 @@ export function DeliveryDetailClient({ deliveryId }: { deliveryId: string }) {
           <HxErrorPanel
             kind="session"
             description={error.message}
-            // セッション切れはフルナビゲーションでReact状態を確実に破棄する
+            // セッション切れは Cookie クリア経由でログインへ戻す（他画面と同じ導線）
             // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-            onAction={() => window.location.assign("/login")}
+            onAction={() => window.location.assign("/api/session/logout")}
           />
         ) : error.kind === "notFound" ? (
           <HxErrorPanel
@@ -271,9 +283,26 @@ export function DeliveryDetailClient({ deliveryId }: { deliveryId: string }) {
   const kana = [identity.familyNameKana, identity.givenNameKana]
     .filter((v): v is string => typeof v === "string" && v.length > 0)
     .join(" ");
-  const canAcknowledge = detail.status === "delivered" || detail.status === "created";
-  const sections = Object.entries(snapshot.sections ?? {});
+  // §18 状態別操作: created はまだ受信扱いにしない（不可）。delivered のみ受領可能
+  const canAcknowledge = detail.status === "delivered";
+  // chiefComplaint は契約上 {value} だが旧データの生文字列も安全側で受ける
+  const chiefComplaintRaw = snapshot.chiefComplaint;
+  const chiefComplaintText =
+    typeof chiefComplaintRaw === "string"
+      ? chiefComplaintRaw
+      : (chiefComplaintRaw && typeof chiefComplaintRaw === "object" && chiefComplaintRaw.value) || "—";
+  // 臨床順（TOPIC_LABEL 定義順）で並べ、形の合わないエントリは落とす
+  const sections = Object.entries(snapshot.sections ?? {})
+    .filter(([, s]) => s && typeof s === "object" && typeof s.answerState === "string")
+    .sort(([a], [b]) => {
+      const order = Object.keys(TOPIC_LABEL);
+      const ia = order.indexOf(a);
+      const ib = order.indexOf(b);
+      return (ia < 0 ? order.length : ia) - (ib < 0 ? order.length : ib);
+    });
   const unanswered = snapshot.unansweredTopics ?? [];
+  const medicationsShared = detail.shareScope.includeConfirmedMedications === true;
+  const profileShared = detail.shareScope.includeProfile === true;
 
   return (
     <div className="space-y-5">
@@ -282,12 +311,17 @@ export function DeliveryDetailClient({ deliveryId }: { deliveryId: string }) {
         description={name ? `${name} さんの問診票（確定版）` : "問診票（確定版）"}
       />
 
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3" ref={statusRef} tabIndex={-1}>
         <HxStatusBadge status={detail.status} />
         <p className="text-hx-caption text-hx-text-subtle">
-          受信: {formatDateTime(detail.deliveredAt ?? detail.createdAt)}
+          {detail.deliveredAt
+            ? `受信: ${formatDateTime(detail.deliveredAt)}`
+            : `作成: ${formatDateTime(detail.createdAt)}`}
           {detail.acknowledgedAt ? ` ／ 受領確認: ${formatDateTime(detail.acknowledgedAt)}` : ""}
         </p>
+        <span role="status" className="sr-only">
+          {detail.status === "acknowledged" ? "受領確認済みです" : ""}
+        </span>
         <span className="flex-1" />
         <Link
           href="/deliveries"
@@ -305,7 +339,16 @@ export function DeliveryDetailClient({ deliveryId }: { deliveryId: string }) {
           kind="error"
           title="受領確認できませんでした"
           description={ackError}
+          actionLabel="状態を再読み込み"
           onAction={() => void load()}
+        />
+      ) : null}
+
+      {detail.status === "revoked" || detail.status === "failed" ? (
+        <HxErrorPanel
+          kind="error"
+          title={detail.status === "revoked" ? "この問診票は取り下げられています" : "この問診票の配送は失敗しています"}
+          description="以下の内容は配送当時のスナップショットです。現在も有効な問診票ではありません。"
         />
       ) : null}
 
@@ -322,6 +365,12 @@ export function DeliveryDetailClient({ deliveryId }: { deliveryId: string }) {
                   {name}
                   {kana ? <span className="ml-2 font-normal text-hx-text-subtle">（{kana}）</span> : null}
                 </dd>
+              </div>
+            ) : null}
+            {!name && kana ? (
+              <div>
+                <dt className="text-hx-caption text-hx-text-subtle">フリガナ</dt>
+                <dd>{kana}</dd>
               </div>
             ) : null}
             {identity.birthDate ? (
@@ -351,7 +400,7 @@ export function DeliveryDetailClient({ deliveryId }: { deliveryId: string }) {
         <dl className="mb-4 space-y-2 text-hx-body">
           <div>
             <dt className="text-hx-caption text-hx-text-subtle">主訴</dt>
-            <dd className="font-semibold">{snapshot.chiefComplaint?.value ?? "—"}</dd>
+            <dd className="font-semibold whitespace-pre-wrap">{chiefComplaintText}</dd>
           </div>
           {snapshot.bodyLocations && snapshot.bodyLocations.length > 0 ? (
             <div>
@@ -374,11 +423,13 @@ export function DeliveryDetailClient({ deliveryId }: { deliveryId: string }) {
             <tbody>
               {sections.map(([topic, section]) => (
                 <HxTr key={topic}>
-                  <HxTd>{TOPIC_LABEL[topic] ?? topic}</HxTd>
-                  <HxTd>
+                  <th scope="row" className="border-b border-hx-divider px-3 py-2.5 text-left align-middle font-semibold">
+                    {TOPIC_LABEL[topic] ?? topic}
+                  </th>
+                  <HxTd className="whitespace-pre-wrap">
                     {section.answerState === "answered" && section.value
                       ? section.value
-                      : ANSWER_STATE_LABEL[section.answerState]}
+                      : (ANSWER_STATE_LABEL[section.answerState] ?? "—")}
                   </HxTd>
                 </HxTr>
               ))}
@@ -393,40 +444,55 @@ export function DeliveryDetailClient({ deliveryId }: { deliveryId: string }) {
         ) : null}
       </section>
 
-      {snapshot.medicationSnapshots && snapshot.medicationSnapshots.length > 0 ? (
-        <section aria-labelledby="medication-heading" className="rounded-md border border-hx-border bg-hx-surface p-5">
-          <h2 id="medication-heading" className="mb-3 text-hx-section-title font-semibold">
-            確認済みの薬剤
-          </h2>
-          <ul className="list-disc space-y-1 pl-5 text-hx-body">
+      <section aria-labelledby="medication-heading" className="rounded-md border border-hx-border bg-hx-surface p-5">
+        <h2 id="medication-heading" className="mb-3 text-hx-section-title font-semibold">
+          確認済みの薬剤
+        </h2>
+        {!medicationsShared ? (
+          <p className="text-hx-body text-hx-text-subtle">
+            患者は今回の送信で薬剤情報の共有を許可していません。
+          </p>
+        ) : snapshot.medicationSnapshots && snapshot.medicationSnapshots.length > 0 ? (
+          <ul className="list-disc space-y-1 pl-5 text-hx-body whitespace-pre-wrap">
             {snapshot.medicationSnapshots.map((m) => (
               <li key={m.medicationId}>{m.displayName}</li>
             ))}
           </ul>
-        </section>
-      ) : null}
+        ) : (
+          <p className="text-hx-body text-hx-text-subtle">共有された薬剤情報はありません。</p>
+        )}
+      </section>
 
-      {snapshot.medicalHistorySnapshot && snapshot.medicalHistorySnapshot.length > 0 ? (
-        <section aria-labelledby="history-heading" className="rounded-md border border-hx-border bg-hx-surface p-5">
-          <h2 id="history-heading" className="mb-3 text-hx-section-title font-semibold">
-            既往歴
-          </h2>
-          <ul className="list-disc space-y-1 pl-5 text-hx-body">
+      <section aria-labelledby="history-heading" className="rounded-md border border-hx-border bg-hx-surface p-5">
+        <h2 id="history-heading" className="mb-3 text-hx-section-title font-semibold">
+          既往歴
+        </h2>
+        {!profileShared ? (
+          <p className="text-hx-body text-hx-text-subtle">
+            患者は今回の送信でプロフィール情報の共有を許可していません。
+          </p>
+        ) : snapshot.medicalHistorySnapshot && snapshot.medicalHistorySnapshot.length > 0 ? (
+          <ul className="list-disc space-y-1 pl-5 text-hx-body whitespace-pre-wrap">
             {snapshot.medicalHistorySnapshot.map((h, i) => (
               <li key={i}>{h.conditionText}</li>
             ))}
           </ul>
-        </section>
-      ) : null}
+        ) : (
+          <p className="text-hx-body text-hx-text-subtle">共有された既往歴はありません。</p>
+        )}
+      </section>
 
       <p className="text-hx-caption text-hx-text-subtle">
         問診票ID: <span className="font-mono">{detail.questionnaireId}</span>
+        <span className="ml-3">版: rev-{detail.questionnaireRevisionId}</span>
         <span className="ml-3 font-mono">{detail.snapshotSha256.slice(0, 12)}…</span>（送信版ハッシュ）
       </p>
 
       <HxConfirmActionDialog
         open={confirmOpen}
-        subject={name ? `${name} さんの問診票` : "この問診票"}
+        subject={
+          name ? `${name} さんの問診票` : `問診票（ID: ${detail.questionnaireId}）`
+        }
         title="受領を確認しますか？"
         description="「受領確認」は診療の予約ではなく、医療機関がこの問診票を受け取ったことを記録する操作です。確認すると一覧の状態が「受領確認済み」に変わります。"
         confirmLabel="受領を確認する"
