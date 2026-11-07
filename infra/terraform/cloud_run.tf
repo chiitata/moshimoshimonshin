@@ -41,10 +41,6 @@ resource "google_cloud_run_v2_service" "api" {
         value = "0.0.0.0"
       }
       env {
-        name  = "PORT"
-        value = "8080"
-      }
-      env {
         name  = "FIREBASE_PROJECT_ID"
         value = var.project_id
       }
@@ -142,10 +138,6 @@ resource "google_cloud_run_v2_service" "worker" {
       env {
         name  = "HOST"
         value = "0.0.0.0"
-      }
-      env {
-        name  = "PORT"
-        value = "8080"
       }
       env {
         name  = "FIREBASE_PROJECT_ID"
