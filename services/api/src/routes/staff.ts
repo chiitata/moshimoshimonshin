@@ -24,8 +24,109 @@ const invitationBody = z.object({ email: z.email(), role: staffRole });
 const membershipBody = z.object({ role: staffRole.optional(), status: z.enum(["active", "revoked"]).optional() })
   .refine((value) => value.role !== undefined || value.status !== undefined);
 
+function toIsoLocal(ts: unknown): string | null {
+  if (
+    typeof ts === "object" &&
+    ts !== null &&
+    "toDate" in ts &&
+    typeof (ts as { toDate: () => Date }).toDate === "function"
+  ) {
+    return (ts as { toDate: () => Date }).toDate().toISOString();
+  }
+  return null;
+}
+
 export function registerStaffRoutes(app: FastifyInstance, deps: Deps): void {
   const typed = app.withTypeProvider<ZodTypeProvider>();
+
+  // H-005 職員一覧（facility_admin 専用。所属メンバー＋保留中招待）
+  typed.get("/v1/hospitals/:facilityId/staff", {
+    config: { access: { tier: "authenticated" } },
+    schema: {
+      params,
+      response: {
+        200: z.object({
+          members: z.array(
+            z.object({
+              membershipId: z.string(),
+              userUid: z.string(),
+              email: z.string().nullable(),
+              role: staffRole,
+              status: z.enum(["active", "revoked"]),
+              createdAt: z.union([z.string(), z.null()]),
+              revokedAt: z.union([z.string(), z.null()]),
+            }),
+          ),
+          invitations: z.array(
+            z.object({
+              invitationId: z.string(),
+              email: z.string(),
+              role: staffRole,
+              createdAt: z.union([z.string(), z.null()]),
+            }),
+          ),
+        }),
+        ...errors(401, 403),
+      },
+      tags: ["hospitals"],
+      summary: "職員一覧（メンバー＋保留招待）",
+      security: [{ bearerAuth: [] }],
+    },
+  }, async (req) => {
+    await requireFacilityRole(deps, req, req.params.facilityId, ["facility_admin"]);
+    const facilityId = req.params.facilityId;
+
+    const memberRows = await queryDocs<{
+      userUid: string;
+      role: string;
+      status: string;
+      createdAt: unknown;
+      revokedAt: unknown;
+    }>(deps.db, "facilityMemberships", [
+      { field: "facilityId", op: "==", value: facilityId },
+    ], { limit: 200 });
+    const invitationRows = await queryDocs<{
+      email: string;
+      role: string;
+      status: string;
+      createdAt: unknown;
+    }>(deps.db, "facilityInvitations", [
+      { field: "facilityId", op: "==", value: facilityId },
+      { field: "status", op: "==", value: "pending" },
+    ], { limit: 100 });
+
+    // メール表示は Firebase Auth が正本。未登録・退会済みは null（権限とは無関係の表示情報）
+    const members = await Promise.all(
+      memberRows.map(async (r) => {
+        let email: string | null = null;
+        try {
+          const user = await deps.authAdmin.getUser(r.data.userUid);
+          email = user?.email ?? null;
+        } catch {
+          email = null;
+        }
+        return {
+          membershipId: r.id,
+          userUid: r.data.userUid,
+          email,
+          role: r.data.role as z.infer<typeof staffRole>,
+          status: r.data.status as "active" | "revoked",
+          createdAt: toIsoLocal(r.data.createdAt),
+          revokedAt: toIsoLocal(r.data.revokedAt),
+        };
+      }),
+    );
+
+    return {
+      members,
+      invitations: invitationRows.map((r) => ({
+        invitationId: r.id,
+        email: r.data.email,
+        role: r.data.role as z.infer<typeof staffRole>,
+        createdAt: toIsoLocal(r.data.createdAt),
+      })),
+    };
+  });
 
   typed.post("/v1/hospitals/:facilityId/staff-invitations", {
     config: { access: { tier: "authenticated" } },
