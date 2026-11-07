@@ -96,11 +96,12 @@ export function HxAppShell({
       if (drawer) containTabKey(drawer, event);
     }
     document.addEventListener("keydown", onKeyDown);
+    const menuButton = menuButtonRef.current;
     return () => {
       document.removeEventListener("keydown", onKeyDown);
       media.removeEventListener("change", onMediaChange);
       document.body.style.overflow = previousOverflow;
-      menuButtonRef.current?.focus();
+      menuButton?.focus();
     };
   }, [drawerOpen]);
 
@@ -118,6 +119,7 @@ export function HxAppShell({
 
       {/* 上部ヘッダー 56px（§16.3）。施設名は業務コンテキストの証拠として常時表示。 */}
       <header
+        inert={drawerOpen}
         className={`${pos} inset-x-0 top-0 z-40 flex h-14 items-center gap-3 border-b border-hx-border bg-hx-surface px-4 md:px-6`}
       >
         <button
@@ -159,6 +161,7 @@ export function HxAppShell({
       {/* 1024–1199px: 72px アイコンレール */}
       <nav
         aria-label="主要ナビゲーション"
+        inert={drawerOpen}
         className={`${pos} bottom-0 left-0 top-14 z-30 hidden w-18 border-r border-hx-border bg-hx-surface lg:block min-[1200px]:hidden`}
       >
         <ul className="space-y-1 p-2">
@@ -170,6 +173,7 @@ export function HxAppShell({
       {/* ≥1200px: ラベル付きサイドバー（1200–1439は220px、1440以上は240px） */}
       <nav
         aria-label="主要ナビゲーション"
+        inert={drawerOpen}
         className={`${pos} bottom-0 left-0 top-14 z-30 hidden w-55 border-r border-hx-border bg-hx-surface min-[1200px]:block min-[1440px]:w-60`}
       >
         <ul className="space-y-1 p-3">
@@ -190,6 +194,8 @@ export function HxAppShell({
           <nav
             ref={drawerRef}
             id="hx-mobile-nav"
+            role="dialog"
+            aria-modal="true"
             aria-label="主要ナビゲーション"
             className="absolute bottom-0 left-0 top-0 w-64 bg-hx-surface shadow-xl"
           >
@@ -215,6 +221,7 @@ export function HxAppShell({
 
       <main
         id="hx-main-content"
+        inert={drawerOpen}
         tabIndex={-1}
         className={`pt-14 lg:pl-18 min-[1200px]:pl-55 min-[1440px]:pl-60 ${framed ? "h-full overflow-auto" : "min-h-screen"}`}
       >
