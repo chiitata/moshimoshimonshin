@@ -230,7 +230,7 @@ logs-watch: ## ファイル監視のログを表示
 ##@ その他
 
 test-api-emulator: ## API エミュレータ結合テスト（compose のエミュレータ起動中に実行）
-	@curl -sf -o /dev/null http://localhost:8081/ || { echo "error: Firebaseエミュレータが起動していません（make start-firebase）"; exit 1; }
+	@curl -sf -o /dev/null http://localhost:8081/ && curl -sf -o /dev/null http://localhost:9099/ || { echo "error: Firebaseエミュレータが起動していません（make start-firebase）"; exit 1; }
 	@[ -d services/api/node_modules ] || npm --prefix services/api ci
 	npm --prefix services/api run test:emulator:compose
 

@@ -119,7 +119,7 @@ export class FakeAuthAdmin implements AuthAdmin {
 
   async deleteUser(uid: string): Promise<void> {
     if (this.failOn.has("delete")) throw new Error("auth/delete failed");
-    this.users.delete(uid);
+    if (!this.users.delete(uid)) throw FakeAuthAdmin.notFound();
   }
 
   async revokeRefreshTokens(_uid: string): Promise<void> {

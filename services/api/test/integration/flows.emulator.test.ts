@@ -310,8 +310,10 @@ describe("E2E server-side perspectives / Firestore エミュレータ結合", ()
       await deps.firestore.doc(`medications/${medicationId}`).get()
     ).data()!;
     expect(doc.displayName).toBe("正しい薬剤名");
+    expect(doc.strength ?? null).toBeNull();
     expect(doc.currentStatus).toBe("not_sure");
     expect(doc.confirmationStatus).toBe("unconfirmed");
+    expect(doc.userConfirmedAt ?? null).toBeNull();
 
     // 一覧でも未確認のまま返る（誤った元候補を勝手に確定扱いしない）
     const list = await app.inject({
