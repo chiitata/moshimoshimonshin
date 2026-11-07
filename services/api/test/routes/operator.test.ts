@@ -305,6 +305,8 @@ describe("POST /v1/operator/facilities/:facilityId/disable", () => {
       .data() as FacilityDoc;
     expect(fac.receivingDisabledBy).toBe("platform");
     expect(fac.receivingDisabledReason).toBe("緊急: 不正申請の疑い");
+    // 停止開始時刻は実際に止まった施設側の時刻を保持する
+    expect(fac.receivingDisabledAt).toBeTruthy();
 
     // 引き上げは遷移なので監査を発行する
     const events = await auditActions(deps, "FACILITY_RECEIVING_DISABLED");

@@ -39,7 +39,7 @@ const verifyBody = z.object({
 });
 
 const disableBody = z.object({
-  reason: z.string().min(1).max(500),
+  reason: z.string().trim().min(1).max(500),
 });
 
 const jobFailuresQuery = z.object({

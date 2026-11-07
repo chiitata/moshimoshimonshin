@@ -608,8 +608,27 @@ describe("hospital receive routes (#18, API-031〜033)", () => {
       const body = res.json();
       expect(body.legalName).toBe("医療法人テスト会テスト病院");
       expect(body.displayName).toBe("テスト病院");
+      expect(body.formattedAddress).toBe("東京都千代田区1-1-1");
       expect(body.verificationStatus).toBe("verified");
       expect(body.receivingEnabled).toBe(true);
+    });
+
+    it("施設自身が停止した場合は停止理由を参照できる", async () => {
+      const { deps, app } = await setup();
+      await seedMembership(deps, STAFF_A, FACILITY_A, "facility_admin");
+      await seedFacility(deps, FACILITY_A, {
+        receivingEnabled: false,
+        receivingDisabledBy: "staff",
+        receivingDisabledReason: "年末年始休診",
+      });
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/v1/hospitals/${FACILITY_A}/settings`,
+        headers: authHeader(STAFF_A),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().receivingDisabledReason).toBe("年末年始休診");
     });
 
     it("管理者以外・未所属は403、施設なしは404", async () => {
