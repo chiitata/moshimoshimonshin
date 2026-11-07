@@ -341,7 +341,11 @@ export function registerHospitalRoutes(app: FastifyInstance, deps: Deps): void {
         receivingEnabled: fac.receivingEnabled,
         receivingDisabledBy: fac.receivingDisabledBy ?? null,
         receivingDisabledAt: toIso(fac.receivingDisabledAt),
-        receivingDisabledReason: fac.receivingDisabledReason ?? null,
+        // 停止理由は運営記録（非公開）。施設自身が記入した停止のみ開示する
+        receivingDisabledReason:
+          fac.receivingDisabledBy === "staff"
+            ? (fac.receivingDisabledReason ?? null)
+            : null,
       };
     },
   );
@@ -359,7 +363,7 @@ export function registerHospitalRoutes(app: FastifyInstance, deps: Deps): void {
         body: z
           .object({
             receivingEnabled: z.boolean(),
-            reason: z.string().min(1).max(500).optional(),
+            reason: z.string().trim().min(1).max(500).optional(),
           })
           // 施設自身による受付停止は理由を必須とする（患者側の問い合わせ対応のため）
           .refine((b) => b.receivingEnabled || b.reason !== undefined),
@@ -423,6 +427,11 @@ export function registerHospitalRoutes(app: FastifyInstance, deps: Deps): void {
             facilityId: req.params.facilityId,
             requestId: req.id,
             decision: "allow",
+            outcome: "success",
+            // 停止理由は監査にも残す（再開で施設docから消えても追跡可能にするため）
+            details: enabling
+              ? { from: "disabled" }
+              : { from: "enabled", reason: req.body.reason! },
           }),
         );
       });

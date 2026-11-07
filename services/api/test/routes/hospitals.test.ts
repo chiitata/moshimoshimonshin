@@ -693,6 +693,7 @@ describe("hospital receive routes (#18, API-031〜033)", () => {
       expect(fac.receivingEnabled).toBe(true);
       expect(fac.receivingDisabledBy).toBeNull();
       expect(fac.receivingDisabledReason).toBeNull();
+      expect(fac.receivingDisabledAt).toBeNull();
 
       const audits = await deps.db.collection("auditEvents").get();
       const actions = audits.docs.map((d) => d.data().action);
@@ -723,6 +724,57 @@ describe("hospital receive routes (#18, API-031〜033)", () => {
         });
         expect(res.statusCode).toBe(409);
       }
+    });
+
+    it("PATCHは管理者以外403・施設なし404・空白のみの理由は400", async () => {
+      const { deps, app } = await setup();
+      await seedMembership(deps, STAFF_A, FACILITY_A); // facility_staff
+      await seedMembership(deps, STAFF_B, FACILITY_B, "facility_admin");
+      await seedFacility(deps, FACILITY_A);
+
+      const staffPatch = await app.inject({
+        method: "PATCH",
+        url: `/v1/hospitals/${FACILITY_A}/settings`,
+        headers: authHeader(STAFF_A),
+        payload: { receivingEnabled: false, reason: "x" },
+      });
+      expect(staffPatch.statusCode).toBe(403);
+
+      const missing = await app.inject({
+        method: "PATCH",
+        url: `/v1/hospitals/${FACILITY_B}/settings`,
+        headers: authHeader(STAFF_B),
+        payload: { receivingEnabled: false, reason: "x" },
+      });
+      expect(missing.statusCode).toBe(404);
+
+      await seedMembership(deps, STAFF_A, FACILITY_A, "facility_admin");
+      const blank = await app.inject({
+        method: "PATCH",
+        url: `/v1/hospitals/${FACILITY_A}/settings`,
+        headers: authHeader(STAFF_A),
+        payload: { receivingEnabled: false, reason: "   " },
+      });
+      expect(blank.statusCode).toBe(400);
+    });
+
+    it("運営停止時の停止理由は施設へ返さない（運営記録は非公開）", async () => {
+      const { deps, app } = await setup();
+      await seedMembership(deps, STAFF_A, FACILITY_A, "facility_admin");
+      await seedFacility(deps, FACILITY_A, {
+        receivingEnabled: false,
+        receivingDisabledBy: "platform",
+        receivingDisabledReason: "緊急: 不正申請の疑い",
+      });
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/v1/hospitals/${FACILITY_A}/settings`,
+        headers: authHeader(STAFF_A),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().receivingDisabledBy).toBe("platform");
+      expect(res.json().receivingDisabledReason).toBeNull();
     });
 
     it("再認証が古い場合は403 REAUTH_REQUIRED", async () => {
