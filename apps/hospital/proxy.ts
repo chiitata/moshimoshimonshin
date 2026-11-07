@@ -1,7 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { validateClientConfig, type ClientConfigInput } from "./lib/client-config";
-import { PATHNAME_HEADER, sessionCookieName } from "./lib/session-shared";
+import {
+  PATHNAME_HEADER,
+  SESSION_COOKIE_DEV,
+  SESSION_COOKIE_PROD,
+  sessionCookieName,
+} from "./lib/session-shared";
 
 function serviceSources(input: ClientConfigInput) {
   try {
@@ -73,7 +78,16 @@ export function proxy(request: NextRequest) {
   });
   const { pathname, search } = request.nextUrl;
   // 環境で有効なCookie名・非空値だけを見る（旧名・空値の残留Cookieによるガードループを防ぐ）
-  const hasSession = Boolean(request.cookies.get(sessionCookieName())?.value);
+  // 設定不全でも Proxy 自体は落とさず両方のCookie名を確認する
+  let hasSession = false;
+  try {
+    hasSession = Boolean(request.cookies.get(sessionCookieName())?.value);
+  } catch {
+    hasSession = Boolean(
+      request.cookies.get(SESSION_COOKIE_PROD)?.value ||
+        request.cookies.get(SESSION_COOKIE_DEV)?.value,
+    );
+  }
   const isProtected = PROTECTED_PREFIXES.some(
     (p) => pathname === p || pathname.startsWith(`${p}/`),
   );
