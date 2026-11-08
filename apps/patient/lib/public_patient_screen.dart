@@ -33,7 +33,8 @@ class PublicPatientScreen extends StatefulWidget {
 class _PublicPatientScreenState extends State<PublicPatientScreen> {
   final _email = TextEditingController(), _password = TextEditingController();
   final _symptom = TextEditingController(),
-      _facilityId = TextEditingController();
+      _facilityId = TextEditingController(),
+      _answerText = TextEditingController();
   late final StreamSubscription<void> _subscription;
   final _profileFields = <String, TextEditingController>{
     for (final key in [
@@ -65,6 +66,8 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
   String? _disclosureVersion, _disclosureHash;
   String _bodyLocation = 'whole_body';
   Map<String, dynamic>? _intake, _question, _summary, _facility, _delivery;
+  Map<String, Object?>? _pendingAnswer;
+  bool _answerUncertain = false;
   List<dynamic> _history = [];
   int _questionnaireRevision = 1;
   PublicPatientApi get api => widget.api;
@@ -107,6 +110,7 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
     _disclosureHash = null;
     _history = [];
     _symptom.clear();
+    _answerText.clear();
     _legal = {};
     _accepted.clear();
     _consentKey = null;
@@ -115,6 +119,8 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
     }
     _password.clear();
     _bodyLocation = 'whole_body';
+    _pendingAnswer = null;
+    _answerUncertain = false;
     _questionnaireRevision = 1;
     _reviewed = _share = _profile = _medications = false;
     _error = _notice = null;
@@ -127,6 +133,7 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
       _email,
       _password,
       _symptom,
+      _answerText,
       _facilityId,
       ..._profileFields.values,
     ]) {
@@ -333,7 +340,16 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
   };
 
   Future<void> _loadIntake() async {
-    _intake = await api.request('GET', '/intakes/${_id(_intakeId)}');
+    final generation = _generation;
+    final intakeId = _id(_intakeId);
+    final intake = await api.request('GET', '/intakes/$intakeId');
+    if (!mounted || generation != _generation || _id(_intakeId) != intakeId) {
+      return;
+    }
+    if (intake['questions'] is! List || intake['answers'] is! List) {
+      throw const PatientRequestFailure('INVALID_RESPONSE');
+    }
+    _intake = intake;
     _revision(_intake!);
   }
 
@@ -368,6 +384,10 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
   }
 
   Future<void> _nextQuestion() async {
+    if (_pendingAnswer != null) {
+      throw const PatientRequestFailure('409');
+    }
+    final previousQuestionId = _question?['questionId'];
     await _loadIntake();
     if (_intake!['status'] == 'review') {
       await _review();
@@ -413,6 +433,7 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
         _question!['options'] is! List) {
       throw const PatientRequestFailure('INVALID_RESPONSE');
     }
+    if (previousQuestionId != _question!['questionId']) _answerText.clear();
     await _loadIntake();
     if (mounted) {
       setState(() {
@@ -422,28 +443,105 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
   }
 
   Future<void> _answer(String? code, String state) async {
-    final q = _question!;
-    await _loadIntake();
-    final answers = _intake!['answers'] as List;
-    if (!answers.whereType<Map>().any(
-      (a) =>
-          a['questionId'] == q['questionId'] &&
-          a['questionRevision'] == q['questionRevision'],
-    )) {
+    if (_answerUncertain) {
+      throw const PatientRequestFailure('409');
+    }
+    final generation = _generation;
+    final session = api.session();
+    final intakeId = _id(_intakeId);
+    final q = Map<String, dynamic>.from(_question!);
+    if (_pendingAnswer == null) {
+      final freeText = state == 'answered' ? _answerText.text : '';
+      // Dart String.length and the API's JavaScript string limit both count
+      // UTF-16 code units.
+      if (freeText.length > 2000) {
+        throw const PatientRequestFailure('400');
+      }
+      _pendingAnswer = {
+        'questionId': _id(q['questionId']),
+        'questionRevision': q['questionRevision'],
+        'selectedCodes': code == null ? <String>[] : [code],
+        'answerState': state,
+        if (freeText.trim().isNotEmpty) 'freeText': freeText,
+      };
+    }
+    final pending = _pendingAnswer!;
+    if (pending['questionId'] != q['questionId'] ||
+        pending['questionRevision'] != q['questionRevision']) {
+      throw const PatientRequestFailure('409');
+    }
+    try {
+      await _loadIntake();
+    } catch (_) {
+      if (mounted && generation == _generation) _answerUncertain = true;
+      rethrow;
+    }
+    if (!mounted || generation != _generation || _id(_intakeId) != intakeId) {
+      return;
+    }
+    if (!identical(session, api.session())) {
+      // The API binds each request independently. Do not carry an answer read
+      // under one credential epoch into a write under another.
+      setState(() {
+        _generation++;
+        _clear();
+        _step = 'login';
+        _busy = false;
+      });
+      return;
+    }
+    final existing = _answersFor(_intake!, pending);
+    if (existing.isNotEmpty) {
+      // A GET snapshot cannot establish that this submission succeeded, even
+      // when its answer happens to match. Stop rather than infer provenance.
+      _answerUncertain = true;
+      throw const PatientRequestFailure('409');
+    }
+    final questions = _intake!['questions'];
+    final currentQuestion = questions is List
+        ? questions.whereType<Map>().where(
+            (candidate) =>
+                candidate['questionId'] == q['questionId'] &&
+                candidate['questionRevision'] == q['questionRevision'] &&
+                candidate['status'] == 'active',
+          )
+        : const <Map>[];
+    if (_intake!['status'] != 'questioning' || currentQuestion.isEmpty) {
+      _answerUncertain = true;
+      throw const PatientRequestFailure('409');
+    }
+    try {
       await api.request(
         'POST',
-        '/intakes/$_intakeId/answers',
-        body: {
-          'questionId': _id(q['questionId']),
-          'questionRevision': q['questionRevision'],
-          'selectedCodes': code == null ? <String>[] : [code],
-          'answerState': state,
-          'expectedIntakeRevision': _revision(_intake!),
-        },
+        '/intakes/$intakeId/answers',
+        body: {...pending, 'expectedIntakeRevision': _revision(_intake!)},
       );
+    } catch (_) {
+      // The server may have committed before the response was lost. Keep the
+      // intent blocked; a GET snapshot cannot safely resolve this outcome.
+      if (mounted && generation == _generation) _answerUncertain = true;
+      rethrow;
     }
+    if (!mounted || generation != _generation || _id(_intakeId) != intakeId) {
+      return;
+    }
+    _pendingAnswer = null;
+    _answerUncertain = false;
+    _answerText.clear();
     await _nextQuestion();
   }
+
+  List<Map> _answersFor(
+    Map<String, dynamic> intake,
+    Map<String, Object?> pending,
+  ) => (intake['answers'] as List)
+      .whereType<Map>()
+      .where(
+        (answer) =>
+            answer['questionId'] == pending['questionId'] &&
+            answer['questionRevision'] == pending['questionRevision'],
+      )
+      .toList();
 
   Future<void> _review() async {
     await _loadIntake();
@@ -838,16 +936,34 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
         style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
       ),
       const SizedBox(height: 16),
+      if (_question != null && _pendingAnswer == null)
+        _field('回答の補足（任意・2000文字まで）', _answerText, lines: 3),
       ...((_question?['options'] as List?) ?? []).whereType<Map>().map(
-        (o) =>
-            _button('${o['label']}', () => _answer('${o['code']}', 'answered')),
+        (o) => _button(
+          '${o['label']}',
+          () => _answer('${o['code']}', 'answered'),
+          enabled: !_answerUncertain,
+        ),
       ),
-      _button('わからない', () => _answer(null, 'unknown')),
-      _button('答えたくない', () => _answer(null, 'skipped')),
-      TextButton(
-        onPressed: _busy ? null : () => _run(_nextQuestion),
-        child: const Text('保存状態を再確認'),
+      _button(
+        'わからない',
+        () => _answer(null, 'unknown'),
+        enabled: !_answerUncertain,
       ),
+      _button(
+        '答えたくない',
+        () => _answer(null, 'skipped'),
+        enabled: !_answerUncertain,
+      ),
+      if (_answerUncertain && _pendingAnswer != null) ...[
+        const Text(
+          '問診の状態を確認できません。保存状況を確定できないため、この回答の再送や問診の再開はできません。ログアウトするか画面を離れてください。',
+        ),
+      ] else
+        TextButton(
+          onPressed: _busy ? null : () => _run(_nextQuestion),
+          child: const Text('次の質問を確認'),
+        ),
     ],
     'review' => [
       const Text(
@@ -1018,7 +1134,13 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
                 if (_notice != null)
                   Semantics(liveRegion: true, child: Text(_notice!)),
                 ..._content(),
-                if (!['login', 'home', 'verify', 'consent', 'profile'].contains(_step))
+                if (![
+                  'login',
+                  'home',
+                  'verify',
+                  'consent',
+                  'profile',
+                ].contains(_step))
                   TextButton(
                     onPressed: _busy
                         ? null
