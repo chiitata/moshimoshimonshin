@@ -1,1 +1,3 @@
 #include "Generated.xcconfig"
+DEVELOPMENT_TEAM = 6MZBUNDJGM
+CODE_SIGN_STYLE = Automatic
