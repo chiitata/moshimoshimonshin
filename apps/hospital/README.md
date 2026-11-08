@@ -2,7 +2,7 @@
 
 `/operator` はFirebase Authでログインし、実装済みBEの `GET /v1/operator/job-failures` を呼び出す運営管理者向け画面です。画像処理/削除処理の失敗一覧とカーソルページングを利用できます。`GET /v1/operator/audit-events` から権限変更等の監査サマリーも新しい順に取得します。イベント種別・操作者区分・UTC日時・認可判断・結果だけを表示し、患者/職員/施設の識別子・ハッシュ・自由記述は表示しません。実API `POST /v1/operator/facilities/{facilityId}/disable` で施設受信の緊急停止、`POST /v1/operator/facilities/{facilityId}/enable` で運営停止の解除も行えます。対象IDと理由の確認後に明示的に実行し、サーバで直近の認証と運営権限を検証します。再認証を求められたらログアウトして再ログインしてください。通信失敗時は処理済みの可能性を表示し、自動再試行しません。固定データ・モックAPIへの自動切替はありません。
 
-職員向けは `/login`（H-001）でメール/パスワード＋TOTP多要素認証を行い、成功時に HttpOnly Cookie のセッションを確立します。`/facilities`（H-002）で業務を行う施設を選択すると、選択は `/api/facility-context` がメンバーシップ照合のうえコンテキスト Cookie に保持し、ヘッダーの施設名に反映されます。施設バッジまたはナビからいつでも切り替えられ、切替は施設別の画面状態をリセットします。`/deliveries`（H-003）は選択中施設の受信問診一覧です。表示は患者氏名・受信日時・状態・問診票IDのみで、検索（氏名の前方一致）と状態絞り込みはサーバ側で自院スコープ内に限定して行い、20件ずつのカーソルページングで取得します。行を開くと問診詳細（H-004）へ進み、同意範囲の患者情報・確定問診票・確認済み薬剤・既往歴を確認して「受領確認」を実行できます（受領は予約ではなく受取の記録で、閲覧・受領はすべて監査記録されます）。施設管理者は `/staff`（H-005）で所属職員と保留中の招待を一覧し、職員の招待・役割変更・停止/再有効化を実行できます（自身の管理者権限の変更・停止はできません。操作は監査記録され、招待先メールアドレスは監査に残しません）。施設管理者は `/settings`（H-006）で施設の宛先確認情報（正式名称・表示名・所在地・審査ステータス）を確認し、問診票の受付を停止・再開できます。
+職員向けは `/login`（H-001）でメール/パスワード認証を行い（Firebaseが要求する場合は登録済みTOTPも検証）、成功時に HttpOnly Cookie のセッションを確立します。`/facilities`（H-002）で業務を行う施設を選択すると、選択は `/api/facility-context` がメンバーシップ照合のうえコンテキスト Cookie に保持し、ヘッダーの施設名に反映されます。施設バッジまたはナビからいつでも切り替えられ、切替は施設別の画面状態をリセットします。`/deliveries`（H-003）は選択中施設の受信問診一覧です。表示は患者氏名・受信日時・状態・問診票IDのみで、検索（氏名の前方一致）と状態絞り込みはサーバ側で自院スコープ内に限定して行い、20件ずつのカーソルページングで取得します。行を開くと問診詳細（H-004）へ進み、同意範囲の患者情報・確定問診票・確認済み薬剤・既往歴を確認して「受領確認」を実行できます（受領は予約ではなく受取の記録で、閲覧・受領はすべて監査記録されます）。施設管理者は `/staff`（H-005）で所属職員と保留中の招待を一覧し、職員の招待・役割変更・停止/再有効化を実行できます（自身の管理者権限の変更・停止はできません。操作は監査記録され、招待先メールアドレスは監査に残しません）。施設管理者は `/settings`（H-006）で施設の宛先確認情報（正式名称・表示名・所在地・審査ステータス）を確認し、問診票の受付を停止・再開できます。
 
 Node.js 22 以降で `npm ci`、`npm run dev` を実行し、http://localhost:3000 を開きます。`npm run lint`、`npm test`、`npm run build` で検証できます。Docker Compose では既存の hospital サービスを使用します。
 
@@ -18,7 +18,9 @@ Node.js 22 以降で `npm ci`、`npm run dev` を実行し、http://localhost:30
 
 ## 職員認証・セッション（H-001）
 
-- `/login` で Firebase Auth（メール/パスワード）にサインインし、MFA 未登録なら TOTP 登録、登録済みなら TOTP 検証を経て、`POST /api/session` が実 API で credential を検証し（本番ではMFAクレームも確認）、HttpOnly Cookie（本番 `__Host-mmr-session`、SameSite=Strict、最長55分）を発行します。失敗してもアカウントの存在有無を示さない応答にします。
+施設選択・切替ではNextの画面遷移とサーバコンテキスト更新を使い、Firebaseのメモリ内認証を保持します。施設IDが変わると業務シェルを再生成し、前施設の一覧・検索条件・管理者ナビを引き継ぎません。
+
+- `/login` で Firebase Auth（メール/パスワード）にサインインし、Firebaseが要求する場合は登録済みTOTPを検証してから、`POST /api/session` が実 API で credential を検証し（本番ではApp Checkも維持）、HttpOnly Cookie（本番 `__Host-mmr-session`、SameSite=Strict、最長55分）を発行します。失敗してもアカウントの存在有無を示さない応答にします。
 - 業務画面は `app/(workspace)/layout.tsx` がセッション Cookie と `GET /v1/me/facility-memberships` で検証します。401/403 なら `GET /api/session/logout` で Cookie を消して `/login` へ、5xx・接続失敗ではセッションを維持したまま再試行可能なエラー画面を出します。`proxy.ts` は Cookie の有無だけの楽観的リダイレクトで、認可の正本は API 側です。
 - クライアントの API 呼び出しは `lib/hx-api.ts` 経由で `/api/hx/*` のみを使い、サーバ側が Bearer + App Check を付けて転送します。`/api/session` と `/api/hx/*` は必須カスタムヘッダー `x-hx-client: portal`・`Sec-Fetch-Site`/`Origin` の同一オリジン確認で CSRF を防ぎます。
 - セッション維持は `workspace-shell.tsx` の `SessionKeeper` が Firebase の ID トークン変更・定期更新・タブ復帰を監視して行います。サインアウト・失効・再読み込み後の未認証では `GET /api/session/logout` 経由で Cookie を削除して `/login` に戻ります（Firebase はインメモリ永続化のため再読み込みは再ログイン）。
@@ -52,7 +54,7 @@ nonceはクライアントのヘッダを上書きし、リクエストごとに
 
 root layoutの `connection()` によりリクエスト時に描画します。PHIをサーバ側で取得せず、
 HTML/RSC・JS/CSS・静的ファイル・ログへ入れない設計制約は引き続き適用します。
-現在の検証は合成入力が応答へ反射しないことまでで、未実装の患者データ取得経路の保証ではありません。
+`test:api`とCIの`test:browser`では、患者APIで配送した合成問診を職員BFFから取得できることと、同じ患者情報が認証後の一覧・詳細のSSR HTML/RSCに含まれないことを確認します。これは実患者データやすべての将来の取得経路を保証するものではありません。
 
 このnonce方式は `next start` 等のNext.jsサーバーを必要とし、静的exportはできません。
 `firebase.json` のhospital `public: apps/hospital/out` は静的配信案のままです。
@@ -62,8 +64,8 @@ HTML/RSC・JS/CSS・静的ファイル・ログへ入れない設計制約は引
 
 `npm run build && npm run test:security` は本番ビルドをloopback上で起動し、
 HTTPヘッダ、nonceの更新・全bootstrap scriptへの一致、静的JS取得、404、RSC、prefetchを検証します。
-実ブラウザでのCSP施行は、後述の任意ブラウザ試験で実Auth/BEへの接続とともに検証します。実クラウドApp Check/MFAと将来の患者データ取得経路のPHI検証は別途必要です。
-現在のログイン・変更APIはメモリ内Bearer token方式で、API fetchはcredentials: omitを使います。サーバ側の認証/App Check/運営権限/再認証を回避しません。将来Cookie認証を導入する場合はHttpOnly・Secure・SameSite・CSRF対策の追加検証が必要です。
+実ブラウザでのCSP施行は、後述の`test:browser`で実Auth/BEへの接続とともに検証します。実クラウドApp Check/MFAと将来の患者データ取得経路のPHI検証は別途必要です。
+運営画面はメモリ内Bearer token方式（API fetchはcredentials: omit）、職員画面は上記のCookie/BFF方式です。通常の`test:api`は、実Auth Emulatorのトークンを既存のセッションAPIで検証してCookieを発行し、HttpOnly・SameSite=Strict・Path・55分期限、未認証/不正トークン拒否、CSRF拒否、施設コンテキストの認可、BFFの別院拒否・所属失効、ログアウト時のCookie消去、認証後応答のno-storeを確認します。試験が実Nextサーバーを動的なloopbackポートで起動・終了するため、Chromeや事前のポータル起動は不要です。テスト用の認可回避やレスポンス差し替えはありません。このHTTP接続試験は職員ログインUIのMFA手順を通しません。EmulatorのHTTP設定で行うため、本番のSecure Cookie・MFA・App Check・HTTPS配信の受入は別途必要です。
 
 方式の根拠: [Next.js CSPガイド](https://nextjs.org/docs/app/guides/content-security-policy)
 およびインストール済みNext.js 16.4.5の `node_modules/next/dist/docs/01-app/02-guides/content-security-policy.md`。
@@ -112,14 +114,14 @@ APIの `API_CORS_ORIGINS` にはブラウザで開くポータルの正確なori
 Next.js ProxyのCSPは同じ接続設定から許可先を生成します。配信先で固定のself限定CSPを重ねないでください。
 
 画面はメール/パスワードと登録済みTOTPの追加認証に対応します。TOTP以外のMFAは未対応です。
+Firebase Authの言語は日本語（`ja`）に固定し、パスワード再設定メールも画面と同じ言語を要求します。実メールの配信・文面の受入確認は別途必要です。
 職員画面は HttpOnly Cookie セッション＋`/api/hx/*` BFF 経由で API を呼び、ID トークンを
 ブラウザ JS・localStorage に置きません（ADR-0020）。運営画面の既存経路はトークンをメモリ内に
 保持する方式のままです。Firebase Auth はインメモリ永続化のため、ブラウザの再読み込みでは
 Firebase 側の認証状態が消え、Cookie も消去して再ログインになります。
-本番では `/api/session` 側でもMFA済みトークンのクレームを確認し、未MFAの Cookie 発行を
-拒否します（サーバ側のMFA強制・運営権限の認可は引き続きBEが担います）。
+`/api/session` は実APIが検証したcredentialでCookieを発行し、職員のMFAクレームを追加条件にしません。運営画面のMFA条件は維持します。
 権限はBEがfacilityMemberships正本で判定します。
-MFA登録は初回ログイン時の画面で行います。他の運営機能は完成扱いにしません。
+職員ログインで新規TOTP登録は要求しません。他の運営機能は完成扱いにしません。
 APIエラー本文やtokenはログへ出さず、レスポンスはAPI-038の公開フィールドだけを画面へ渡します。
 
 ### モックを使わないAPI結合試験
@@ -155,10 +157,17 @@ E2E-006は独立した患者のAuth Emulator tokenと合成の確定問診票・
 この読取経路はStorage/RTDBへアクセスしませんが、BEの接続整合性検証のためそのloopback設定も明示します。
 実クラウドのApp Check/MFA/CORS受入や、他の画面のAPI接続をこの試験だけで完了扱いにしません。
 
-macOSでChromeをインストールしている場合は、同じコマンドに `HOSPITAL_BROWSER_SMOKE=true` を
-追加すると、実画面でのログイン・実BEからの一覧/監査表示・施設審査の承認/却下・確認前の未変更・施設受信停止・ログアウトと、CSP違反が発生しないことも確認します。
-Chromeのパスは `HOSPITAL_CHROME_PATH` で指定可能です。ポータルはloopback:33090で起動し、
-試験後にChromeの一時プロファイル・起動プロセスを終了します。このブラウザ試験は任意実行です。
+ブラウザを含むE2Eは上記のEmulatorコマンド末尾を`npm run test:browser`へ変更して実行します。
+`test:api`はChromeなしのHTTP結合試験、`test:browser`は同じ試験に実UI操作を加えます。
+macOSでは標準のChromeアプリ、Linuxでは`/usr/bin/google-chrome`を使い、別のパスは
+`HOSPITAL_CHROME_PATH`で指定できます。Chromeがなければ明示的に失敗し、試験をスキップしません。
+実画面での運営ログイン・一覧/監査表示・施設審査の承認/却下・確認前の未変更・施設受信停止・ログアウトと、CSP違反が発生しないことも確認します。
+ポータルはloopback:33090で起動し、試験後にChromeの一時プロファイル・起動プロセスを終了します。
+`hospital-ci`はUbuntu 24.04のChrome存在確認後に`test:browser`を実行します。
+
+同じ合成ユーザーに運営権限と施設所属を与え、実SDKでのサインインと既存セッションAPIのトークン検証後に、職員の施設選択→実受信一覧→別施設への切替→元の施設への復帰も検証します。施設切替時の絞り込みリセットと管理者ナビの分離を確認し、職員ログインUIのTOTP登録・検証を受入済みとは扱いません。
+患者APIから別の合成配送を作り、一覧→詳細→受領確認のキャンセル→確定→一覧の受領済み表示まで操作します。閲覧・キャンセル・別施設コンテキストからの閲覧/受領拒否では配送不変、確定後は受領日時・問診スナップショット維持・成功監査1件を実DBで検証します。受信停止・テナント境界の既存試験には別の配送を使い、受領操作で前提を変えません。
+職員管理は実画面から招待・重複拒否・役割変更・停止・再有効化を操作します。招待・役割変更・停止のキャンセルでは実DBや監査が変わらないことを確認し、停止直後には同じ職員トークンで受信APIが403、再有効化後は200になることを検証します。自己管理者の変更・停止操作が出ないことも確認します。合成Authユーザー・所属・招待・関連監査は終了時に削除し、実メールは送信しません。
 
 参照: [App Check custom backend](https://firebase.google.com/docs/app-check/web/custom-resource)、
 [TOTP MFA](https://firebase.google.com/docs/auth/web/totp-mfa)。
@@ -176,4 +185,6 @@ Chromeのパスは `HOSPITAL_CHROME_PATH` で指定可能です。ポータル�
 `firebase/firestore.indexes.json`から通常のRules/indexesデプロイ手順で作成し、利用可能状態を確認してください。
 API/画面とindexのデプロイ、正規MFA/App Check付きのクラウド受入は、このローカル検証だけで完了扱いにしません。
 
-職員の認証フォームはPOSTを明示し、画面初期化前の送信を無効にします。初期化前の標準GET送信によって認証情報がURLへ入ることを防ぎます。任意の実ブラウザ結合試験は`/login`のSSRでPOST・送信無効を確認し、初期化後に送信可能になることも確認します。CSP/no-storeは既存の本番HTTP試験で継続確認します。
+職員の認証フォームはPOSTを明示し、画面初期化前の送信を無効にします。初期化前の標準GET送信によって認証情報がURLへ入ることを防ぎます。実ブラウザ結合試験は`/login`のSSRでPOST・送信無効を確認し、初期化後に送信可能になることも確認します。CSP/no-storeは既存の本番HTTP試験で継続確認します。
+
+2026-11-08の職員認証方針変更: オーナー承認によりTOTP登録を必須としません。`test:browser`は未登録ユーザーの実ログイン→施設選択→HttpOnly Cookie→logoutを確認します。本番App Check/HTTPSと登録済みfactorの受入は別途必要です。
