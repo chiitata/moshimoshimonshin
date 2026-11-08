@@ -21,6 +21,7 @@ test("hospital client uses real Auth + Firestore + Fastify routes (no API stub)"
   const email = `${uid}@example.test`;
   const password = "Synthetic-only-connection-123!";
   const membership = firebase.firestore.doc(`facilityMemberships/${uid}`);
+  const staffMembership = firebase.firestore.doc(`facilityMemberships/${uid}-staff-login`);
   const job = firebase.firestore.doc(`ocrJobs/${uid}`);
   const auditFixtures = Array.from({ length: 25 }, (_, i) => firebase.firestore.doc(`auditEvents/${uid}-${i}`));
   const facility = firebase.firestore.doc(`facilities/${uid}`);
@@ -64,6 +65,7 @@ test("hospital client uses real Auth + Firestore + Fastify routes (no API stub)"
     await assert.rejects(api.auditEvents(), { status: 403 });
     await assert.rejects(api.disableFacility(uid, "Synthetic emergency drill"), { status: 403 });
     await membership.set({ userUid: uid, facilityId: "synthetic-facility", role: "platform_security_admin", status: "active" });
+    await staffMembership.set({ userUid: uid, facilityId: uid, role: "facility_staff", status: "active" });
     await job.set({ status: "failed", errorCode: "engine_unavailable", attempt: 2, updatedAt: new Date(), patientUid: "SYNTHETIC_PRIVATE_VALUE" });
     const page = await api.jobFailures("ocr");
     assert.ok(page.items.some((item) => item.failureCode === "engine_unavailable" && item.attempts === 2));
@@ -177,7 +179,7 @@ test("hospital client uses real Auth + Firestore + Fastify routes (no API stub)"
     await Promise.all([patientAccount.delete(), revision.delete(), questionnaire.delete(), ...consentFixtures.map((ref) => ref.delete()), firebase.auth.deleteUser(patientUid).catch(() => {})]);
     if (previousLegalConfig.exists) await legalConfig.set(previousLegalConfig.data()!);
     else await legalConfig.delete();
-    await Promise.all([membership.delete(), job.delete(), facility.delete(), rejectedFacility.delete(), ...auditFixtures.map((ref) => ref.delete()), firebase.auth.deleteUser(uid).catch(() => {})]);
+    await Promise.all([staffMembership.delete(), membership.delete(), job.delete(), facility.delete(), rejectedFacility.delete(), ...auditFixtures.map((ref) => ref.delete()), firebase.auth.deleteUser(uid).catch(() => {})]);
     await deleteApp(app);
     await deleteApp(patientApp);
     await firebase.firestore.terminate();

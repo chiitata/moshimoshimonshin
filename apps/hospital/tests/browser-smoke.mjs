@@ -49,7 +49,8 @@ export async function browserSmoke({ apiBaseUrl, authHost, email, password, faci
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       const alert = await evaluate("document.querySelector('[role=alert]')?.textContent || ''");
-      throw new Error(`Browser UI did not reach expected state: ${alert}`);
+      const state = await evaluate("({path:location.pathname, hasQuery:!!location.search, heading:document.querySelector('h1')?.textContent, cookieNames:document.cookie.split(';').map(v=>v.split('=')[0].trim())})");
+      throw new Error(`Browser UI did not reach expected state: ${alert}; ${JSON.stringify(state)}`);
     };
     await send("Page.enable", {}, sessionId);
     await send("Runtime.enable", {}, sessionId);
@@ -95,6 +96,28 @@ export async function browserSmoke({ apiBaseUrl, authHost, email, password, faci
     await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.includes('ログアウト')).click()");
     await poll("!!document.querySelector('input[name=email]') && !document.querySelector('tbody') && !document.querySelector('[data-audit-summary]')");
     assert.deepEqual(await evaluate("window.cspViolations"), [], "Real UI/Auth/BE workflow must not violate CSP");
+    // A password-only staff user must reach the real Cookie/BFF workspace
+    // without generating a TOTP enrollment secret or using an API stub.
+    const loginHtml = await (await fetch(`${origin}/login`)).text();
+    assert.match(loginHtml, /<form[^>]*method="post"/);
+    assert.match(loginHtml, /<button[^>]*type="submit"[^>]*disabled=""/);
+    await send("Page.navigate", { url: `${origin}/login` }, sessionId);
+    await poll("!!document.querySelector('#hx-login-email') && !!document.querySelector('button[type=submit]:not(:disabled)')");
+    await evaluate(`document.querySelector('[name=email]').value=${JSON.stringify(email)}; document.querySelector('[name=password]').value=${JSON.stringify(password)}; document.querySelector('form').requestSubmit();`);
+    await poll("location.pathname === '/facilities' && document.body.innerText.includes('合成審査施設')");
+    const { cookies } = await send("Network.getCookies", { urls: [origin] }, sessionId);
+    const sessionCookie = cookies.find((cookie) => cookie.name === "mmr-session");
+    assert.ok(sessionCookie, "Staff sign-in must issue a session cookie");
+    assert.equal(sessionCookie.httpOnly, true);
+    assert.equal(sessionCookie.sameSite, "Strict");
+    assert.ok(!(await evaluate("document.cookie")).includes("mmr-session"));
+    assert.deepEqual(await evaluate("window.cspViolations"), [], "Staff login must preserve CSP");
+    const forbidden = await fetch(`${origin}/api/session`, { method: "POST", headers: { Origin: "https://other.example.test", "x-hx-client": "portal", "content-type": "application/json" }, body: "{}" });
+    assert.equal(forbidden.status, 403, "Cross-origin session creation must remain forbidden");
+    await send("Page.navigate", { url: `${origin}/api/session/logout` }, sessionId);
+    await poll("location.pathname === '/login' && !!document.querySelector('#hx-login-email')");
+    const loggedOut = await send("Network.getCookies", { urls: [origin] }, sessionId);
+    assert.equal(loggedOut.cookies.filter((cookie) => cookie.name === "mmr-session").length, 0, "Logout must clear the HttpOnly cookie");
   } finally {
     socket?.close();
     for (const process of [chrome, next]) {

@@ -2,7 +2,7 @@
 
 `/operator` はFirebase Authでログインし、実装済みBEの `GET /v1/operator/job-failures` を呼び出す運営管理者向け画面です。画像処理/削除処理の失敗一覧とカーソルページングを利用できます。`GET /v1/operator/audit-events` から権限変更等の監査サマリーも新しい順に取得します。イベント種別・操作者区分・UTC日時・認可判断・結果だけを表示し、患者/職員/施設の識別子・ハッシュ・自由記述は表示しません。実API `POST /v1/operator/facilities/{facilityId}/disable` で施設受信の緊急停止も行えます。対象IDと理由の確認後に明示的に実行し、サーバで直近の認証と運営権限を検証します。再認証を求められたらログアウトして再ログインしてください。通信失敗時は処理済みの可能性を表示し、自動再試行しません。固定データ・モックAPIへの自動切替はありません。
 
-職員向けは `/login`（H-001）でメール/パスワード＋TOTP多要素認証を行い、成功時に HttpOnly Cookie のセッションを確立します。`/facilities` では自院の所属・役割・施設の検証状態を確認できます。問診受信（H-003）・問診詳細（H-004）・職員管理（H-005）・施設設定（H-006）は実装中です。
+職員向けは `/login`（H-001）でメール/パスワードで認証を行い、成功時に HttpOnly Cookie のセッションを確立します。`/facilities` では自院の所属・役割・施設の検証状態を確認できます。問診受信（H-003）・問診詳細（H-004）・職員管理（H-005）・施設設定（H-006）は実装中です。
 
 Node.js 22 以降で `npm ci`、`npm run dev` を実行し、http://localhost:3000 を開きます。`npm run lint`、`npm test`、`npm run build` で検証できます。Docker Compose では既存の hospital サービスを使用します。
 
@@ -18,7 +18,7 @@ Node.js 22 以降で `npm ci`、`npm run dev` を実行し、http://localhost:30
 
 ## 職員認証・セッション（H-001）
 
-- `/login` で Firebase Auth（メール/パスワード）にサインインし、MFA 未登録なら TOTP 登録、登録済みなら TOTP 検証を経て、`POST /api/session` が実 API で credential を検証し（本番ではMFAクレームも確認）、HttpOnly Cookie（本番 `__Host-mmr-session`、SameSite=Strict、最長55分）を発行します。失敗してもアカウントの存在有無を示さない応答にします。
+- `/login` で Firebase Auth（メール/パスワード）にサインインし、Firebaseが既存の追加認証を要求した場合のみその検証を経て、`POST /api/session` が実 API で credential を検証し、HttpOnly Cookie（本番 `__Host-mmr-session`、SameSite=Strict、最長55分）を発行します。失敗してもアカウントの存在有無を示さない応答にします。
 - 業務画面は `app/(workspace)/layout.tsx` がセッション Cookie と `GET /v1/me/facility-memberships` で検証します。401/403 なら `GET /api/session/logout` で Cookie を消して `/login` へ、5xx・接続失敗ではセッションを維持したまま再試行可能なエラー画面を出します。`proxy.ts` は Cookie の有無だけの楽観的リダイレクトで、認可の正本は API 側です。
 - クライアントの API 呼び出しは `lib/hx-api.ts` 経由で `/api/hx/*` のみを使い、サーバ側が Bearer + App Check を付けて転送します。`/api/session` と `/api/hx/*` は必須カスタムヘッダー `x-hx-client: portal`・`Sec-Fetch-Site`/`Origin` の同一オリジン確認で CSRF を防ぎます。
 - セッション維持は `workspace-shell.tsx` の `SessionKeeper` が Firebase の ID トークン変更・定期更新・タブ復帰を監視して行います。サインアウト・失効・再読み込み後の未認証では `GET /api/session/logout` 経由で Cookie を削除して `/login` に戻ります（Firebase はインメモリ永続化のため再読み込みは再ログイン）。
@@ -97,14 +97,12 @@ APIの `API_CORS_ORIGINS` にはブラウザで開くポータルの正確なori
 Next.js ProxyのCSPは同じ接続設定から許可先を生成します。配信先で固定のself限定CSPを重ねないでください。
 
 画面はメール/パスワードと登録済みTOTPの追加認証に対応します。TOTP以外のMFAは未対応です。
-職員画面は HttpOnly Cookie セッション＋`/api/hx/*` BFF 経由で API を呼び、ID トークンを
-ブラウザ JS・localStorage に置きません（ADR-0020）。運営画面の既存経路はトークンをメモリ内に
+職員画面は HttpOnly Cookie セッション＋`/api/hx/*` BFF 経由で API を呼びます。Firebase SDKの認証tokenはメモリで扱い、localStorageへ永続化しません（ADR-0024）。運営画面の既存経路はトークンをメモリ内に
 保持する方式のままです。Firebase Auth はインメモリ永続化のため、ブラウザの再読み込みでは
 Firebase 側の認証状態が消え、Cookie も消去して再ログインになります。
-本番では `/api/session` 側でもMFA済みトークンのクレームを確認し、未MFAの Cookie 発行を
-拒否します（サーバ側のMFA強制・運営権限の認可は引き続きBEが担います）。
+`/api/session` は実APIによるcredential検証と所属照会の成功を確認してCookieを発行します。TOTPクレームの存在は独自の追加条件にしません。既存factorの検証、サーバ側の認可・App Checkを回避するものではありません。
 権限はBEがfacilityMemberships正本で判定します。
-MFA登録は初回ログイン時の画面で行います。他の運営機能は完成扱いにしません。
+TOTPの新規登録は要求しません。Identity PlatformアップグレードやAuth設定変更は行いません。既存factorに対するFirebaseの追加認証要求は維持します。他の運営機能は完成扱いにしません。
 APIエラー本文やtokenはログへ出さず、レスポンスはAPI-038の公開フィールドだけを画面へ渡します。
 
 ### モックを使わないAPI結合試験
@@ -155,3 +153,7 @@ Chromeのパスは `HOSPITAL_CHROME_PATH` で指定可能です。ポータル�
 実環境への公開前に`facilityVerificationRecords: facilityId ASC, createdAt DESC`のindexを
 `firebase/firestore.indexes.json`から通常のRules/indexesデプロイ手順で作成し、利用可能状態を確認してください。
 API/画面とindexのデプロイ、正規MFA/App Check付きのクラウド受入は、このローカル検証だけで完了扱いにしません。
+
+パスワードのみの職員の実ブラウザ受入は `HOSPITAL_BROWSER_SMOKE=true` の結合試験に含みます。実Auth Emulatorで `/login` → HttpOnly/SameSite=Strict Cookie → 実所属APIを使った `/facilities` → logoutとCookie削除、クロスオリジンのセッション作成拒否を確認します。実クラウドOAuth/メール設定の受入を代用しません。
+
+職員ログインフォームはPOSTを明示し、画面初期化前は送信を無効にします。JavaScript初期化前の標準GET送信で認証情報がURLへ入ることを防ぎます。
