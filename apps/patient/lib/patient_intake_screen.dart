@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'intake_question_flow.dart';
 import 'patient_intake_api.dart';
 
 class PatientIntakeScreen extends StatefulWidget {
@@ -27,14 +28,41 @@ class PatientIntakeScreen extends StatefulWidget {
 }
 
 class _PatientIntakeScreenState extends State<PatientIntakeScreen> {
+  static const _bodyLocationOptions = <(String, String)>[
+    ('head', '頭'),
+    ('face', '顔'),
+    ('neck', '首'),
+    ('throat', 'のど'),
+    ('chest', '胸'),
+    ('abdomen', 'お腹'),
+    ('upper_back', '背中（上部）'),
+    ('lower_back', '腰・背中（下部）'),
+    ('left_shoulder', '左肩'),
+    ('right_shoulder', '右肩'),
+    ('left_arm', '左腕'),
+    ('right_arm', '右腕'),
+    ('left_hand', '左手'),
+    ('right_hand', '右手'),
+    ('left_leg', '左脚'),
+    ('right_leg', '右脚'),
+    ('left_knee', '左膝'),
+    ('right_knee', '右膝'),
+    ('left_foot', '左足'),
+    ('right_foot', '右足'),
+    ('skin', '皮膚'),
+    ('whole_body', '全身'),
+    ('other', 'その他'),
+  ];
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _symptoms = TextEditingController();
+  final Set<String> _bodyLocations = {};
   late final StreamSubscription<void> _subscription;
   bool _ready = false, _busy = false, _saved = false;
   int _generation = 0;
   String? _message;
   IntakeSubmission? _submission;
+  int? _startRevision;
 
   @override
   void initState() {
@@ -49,7 +77,9 @@ class _PatientIntakeScreenState extends State<PatientIntakeScreen> {
         _ready = false;
         _saved = false;
         _submission = null;
+        _startRevision = null;
         _symptoms.clear();
+        _bodyLocations.clear();
         _message = null;
       });
     });
@@ -131,17 +161,21 @@ class _PatientIntakeScreenState extends State<PatientIntakeScreen> {
       });
       return;
     }
-    _submission ??= IntakeSubmission(text);
+    _submission ??= IntakeSubmission(
+      text,
+      bodyLocations: _bodyLocations.toList(),
+    );
     final generation = _generation;
     setState(() {
       _busy = true;
       _message = null;
     });
     try {
-      await widget.api.submit(_submission!);
+      final revision = await widget.api.submit(_submission!);
       if (!mounted || generation != _generation) return;
       setState(() {
         _saved = true;
+        _startRevision = revision;
         _symptoms.clear();
       });
     } catch (error) {
@@ -228,9 +262,16 @@ class _PatientIntakeScreenState extends State<PatientIntakeScreen> {
                     onPressed: _busy ? null : _login,
                     child: const Text('ログイン'),
                   ),
-                ] else if (_saved) ...[
-                  const Text('問診の症状を保存しました。', semanticsLabel: '問診の症状を保存しました。'),
-                  const Text('医療機関への送信や問診票の確定はまだ行っていません。'),
+                ] else if (_saved &&
+                    _submission != null &&
+                    _startRevision != null) ...[
+                  const Text('症状を保存しました。続けて質問にお答えください。'),
+                  const SizedBox(height: 16),
+                  IntakeQuestionFlow(
+                    api: widget.api,
+                    submission: _submission!,
+                    startRevision: _startRevision!,
+                  ),
                 ] else ...[
                   TextField(
                     controller: _symptoms,
@@ -243,6 +284,23 @@ class _PatientIntakeScreenState extends State<PatientIntakeScreen> {
                       border: OutlineInputBorder(),
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  const Text('気になる部位（複数選択可・未選択でも可）'),
+                  for (final (code, label) in _bodyLocationOptions)
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(label),
+                      value: _bodyLocations.contains(code),
+                      onChanged: _busy || _submission != null
+                          ? null
+                          : (selected) => setState(() {
+                              if (selected == true) {
+                                _bodyLocations.add(code);
+                              } else {
+                                _bodyLocations.remove(code);
+                              }
+                            }),
+                    ),
                   const SizedBox(height: 16),
                   FilledButton(
                     onPressed: _busy ? null : _save,

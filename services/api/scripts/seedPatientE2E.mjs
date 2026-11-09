@@ -180,6 +180,29 @@ const gateUid = await ensureNamedUser(GATE_EMAIL, GATE_PASSWORD);
 await seedLegalPendingAccount(gateUid);
 console.log(`seeded consent-gated patient uid=${gateUid} email=${GATE_EMAIL}`);
 
+// A separate ready patient for the deletion lifecycle E2E (E2E-005), so
+// requesting/cancelling deletion never mutates the intake patient's state.
+const DEL_EMAIL =
+  process.env.E2E_DELETION_EMAIL ?? "synthetic-deletion@example.test";
+const DEL_PASSWORD =
+  process.env.E2E_DELETION_PASSWORD ?? "local-only-deletion-123!";
+const delUid = await ensureNamedUser(DEL_EMAIL, DEL_PASSWORD);
+await seedAccount(delUid);
+await seedCompleteProfile(delUid);
+await seedCurrentConsents(delUid);
+console.log(`seeded deletion patient uid=${delUid} email=${DEL_EMAIL}`);
+
+// A federated first-use patient: authenticated, but no account document exists
+// yet (the OAuth Auth UID is created before any app account). /me reports
+// legal_pending and intake must be gated (E2E-001C, docs/03 §3.1). No Firestore
+// docs are written for this user on purpose.
+const FED_EMAIL =
+  process.env.E2E_FEDERATED_EMAIL ?? "synthetic-federated-new@example.test";
+const FED_PASSWORD =
+  process.env.E2E_FEDERATED_PASSWORD ?? "local-only-federated-123!";
+const fedUid = await ensureNamedUser(FED_EMAIL, FED_PASSWORD);
+console.log(`seeded federated first-use patient uid=${fedUid} email=${FED_EMAIL} (no account doc)`);
+
 await seedFacility();
 const staffUid = await ensureNamedUser(STAFF_EMAIL, STAFF_PASSWORD);
 await seedMembership(staffUid, STAFF_EMAIL, FACILITY_ID, "facility_admin");
