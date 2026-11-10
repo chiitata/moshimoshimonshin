@@ -21,6 +21,8 @@ class PatientRequestFailure implements Exception {
   final String? apiCode;
   final bool retryable;
   String get message => switch (code) {
+    'APP_CHECK_UNAVAILABLE' =>
+      'アプリの安全性を確認できません。時間をおいて、アプリやブラウザを開き直してください。続く場合はサポートへお問い合わせください。',
     'LEGAL_UNAVAILABLE' => '利用文書を確認できません。運営者による文書の準備が必要です。',
     '500' || '503' => 'サービスの準備状況を確認できません。時間をおいて再試行してください。',
     '401' => 'ログインの有効期限が切れました。ログインし直してください。',
