@@ -44,6 +44,8 @@ remote stateの設定は `backend.tf.example` をローカルの `backend.local.
 
 ## 注意
 
+- 自己専用合成デモの2変数はAPI envとして宣言するが、既定は無効・累積上限1000。今回のデモ反映では **Terraform apply禁止**。承認後の限定env更新・停止と将来の入力値整合は [専用手順](../../docs/SYNTHETIC_SELF_SERVICE_DEMO.md#今回の本番反映境界とterraform-drift) を参照し、既存AI/CORS/secret等の差異を混ぜない。
+
 - **apply には管理対象ごとの権限が必要**。IAM・SA作成を含むためEditorだけでは不足する。必要権限を管理者が付与し、Ownerの一律配布はしない。
 - `project_id` は `.firebaserc` の `moshimoshimonshin` ではなく Firebase 実体
   （`project-7efcc4c4-...`）を確定して使う。
