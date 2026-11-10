@@ -66,8 +66,8 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
   final _symptom = TextEditingController(),
       _facilityId = TextEditingController();
   final _answerFreeText = TextEditingController();
-  // チャットの最新の質問を画面下へスクロールするためのコントローラ。
   final _scroll = ScrollController();
+  final _activeQuestionKey = GlobalKey();
   late final StreamSubscription<void> _subscription;
   final _profileFields = <String, TextEditingController>{
     for (final key in [
@@ -207,11 +207,13 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
     super.dispose();
   }
 
-  /// チャットの最新メッセージが見えるよう最下部へスクロールする（アニメなし）。
-  void _scrollToLatest() {
+  /// 回答欄の下端ではなく、今答える質問を表示する。
+  void _scrollToCurrentQuestion() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) {
-        _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      if (!mounted || _step != 'question') return;
+      final questionContext = _activeQuestionKey.currentContext;
+      if (questionContext != null) {
+        Scrollable.ensureVisible(questionContext, alignment: 0.08);
       }
     });
   }
@@ -648,10 +650,11 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
     _validateActiveQuestion(_question!);
     _questionIntakeRevision = _revision(_intake!);
     if (mounted) {
+      FocusScope.of(context).unfocus();
       setState(() {
         _step = 'question';
       });
-      _scrollToLatest();
+      _scrollToCurrentQuestion();
     }
   }
 
@@ -1850,11 +1853,14 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
       // 会話トランスクリプト（これまでの症状・質問・回答）をチャット表示。
       ..._chatTranscript(),
       // 現在の質問をアシスタントの最新の吹き出しとして表示。
-      _chatBubble(
-        '${_question?['questionText'] ?? ''}',
-        fromUser: false,
-        emphasis: true,
-        header: true,
+      KeyedSubtree(
+        key: _activeQuestionKey,
+        child: _chatBubble(
+          '${_question?['questionText'] ?? ''}',
+          fromUser: false,
+          emphasis: true,
+          header: true,
+        ),
       ),
       const SizedBox(height: 8),
       // 回答コンポーザ（選択肢・自由記述・わからない・答えたくない）。

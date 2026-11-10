@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:patient/public_patient_api.dart';
 import 'package:patient/public_patient_screen.dart';
+import 'package:patient/patient_theme.dart';
 
 Map<String, dynamic> _question(String id, int index) => {
   'questionId': id,
@@ -39,6 +40,7 @@ class _IntakeBackend {
   bool reviewAfterAnswer = false;
   List<String>? selectedCodesAfterAnswer;
   final questions = <Map<String, dynamic>>[];
+  List<Map<String, String>>? questionOptions;
   final invalidatedQuestions = <String>{};
   final answerPatches = <Map<String, dynamic>>[];
   final requestPaths = <String>[];
@@ -91,6 +93,9 @@ class _IntakeBackend {
       await intakeGetGate?.future;
       final questionId = 'q$nextQuestion';
       final current = _question(questionId, nextQuestion - 1)
+        ..['options'] =
+            questionOptions ??
+            _question(questionId, nextQuestion - 1)['options']
         ..['status'] = answers.any((a) => a['questionId'] == questionId)
             ? 'answered'
             : 'active';
@@ -119,6 +124,9 @@ class _IntakeBackend {
       }
       nextQuestion++;
       final generated = _question('q$nextQuestion', nextQuestion - 1)
+        ..['options'] =
+            questionOptions ??
+            _question('q$nextQuestion', nextQuestion - 1)['options']
         ..['status'] = 'active';
       if (invalidatedQuestions.isNotEmpty) {
         questions.add(generated);
@@ -264,11 +272,13 @@ Future<void> _openQuestion(
   _IntakeBackend backend, {
   Stream<void> changes = const Stream<void>.empty(),
   DateTime Function()? clock,
+  ThemeData? theme,
 }) async {
   final client = backend.client();
   addTearDown(client.close);
   await tester.pumpWidget(
     MaterialApp(
+      theme: theme,
       home: PublicPatientScreen(
         api: PublicPatientApi(
           origin: 'https://api.example.test',
@@ -304,6 +314,56 @@ Future<void> _openQuestion(
 }
 
 void main() {
+  testWidgets('回答後は入力キーボードを閉じて次の質問を表示する', (tester) async {
+    final backend = _IntakeBackend();
+    await _openQuestion(tester, backend);
+    await tester.showKeyboard(find.byKey(const ValueKey('回答（任意）')));
+    await tester.pumpAndSettle();
+    expect(tester.testTextInput.isVisible, isTrue);
+    final answer = find.widgetWithText(FilledButton, 'はい');
+    await tester.ensureVisible(answer);
+    await tester.tap(answer);
+    await tester.pumpAndSettle();
+    expect(tester.testTextInput.isVisible, isFalse);
+    final viewport = tester.getRect(find.byType(SingleChildScrollView));
+    final question = tester.getRect(find.text('合成の質問q2'));
+    expect(question.top, greaterThanOrEqualTo(viewport.top));
+    expect(question.bottom, lessThanOrEqualTo(viewport.bottom));
+  });
+
+  for (final textScale in [1.0, 1.4]) {
+    testWidgets('最新の質問と回答候補が画面内に残る（文字倍率$textScale）', (tester) async {
+      tester.view.physicalSize = const Size(390, 760);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = textScale;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      final backend = _IntakeBackend()
+        ..intakeOverride = {'initialSymptomText': '合成症状'}
+        ..questionOptions = [
+          {'code': 'YES', 'label': 'はい'},
+          {'code': 'NO', 'label': 'いいえ'},
+          {'code': 'OTHER', 'label': 'ほかの回答'},
+          {'code': 'UNKNOWN', 'label': '分からない'},
+        ];
+      await _openQuestion(tester, backend, theme: buildPatientTheme());
+
+      for (var index = 1; index <= 6; index++) {
+        final viewport = tester.getRect(find.byType(SingleChildScrollView));
+        final question = tester.getRect(find.text('合成の質問q$index'));
+        final answer = find.widgetWithText(FilledButton, 'はい');
+        final answerRect = tester.getRect(answer);
+        expect(question.top, greaterThanOrEqualTo(viewport.top));
+        expect(question.bottom, lessThanOrEqualTo(viewport.bottom));
+        expect(answerRect.top, greaterThanOrEqualTo(viewport.top));
+        expect(answerRect.bottom, lessThanOrEqualTo(viewport.bottom));
+        await tester.tap(answer);
+        await tester.pumpAndSettle();
+      }
+    });
+  }
+
   testWidgets(
     'first-time registration uses public documents, consent and API',
     (tester) async {
