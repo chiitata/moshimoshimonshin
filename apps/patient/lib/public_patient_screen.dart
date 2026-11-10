@@ -92,6 +92,7 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
   String _step = 'login';
   bool _busy = false,
       _firstRegistration = false,
+      _justRegistered = false,
       _answerAttempted = false,
       _answerUncertain = false,
       _reviewed = false,
@@ -179,6 +180,7 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
     _registrationKey = null;
     _registrationRecoveryNotice = null;
     _firstRegistration = false;
+    _justRegistered = false;
     for (final field in _profileFields.values) {
       field.clear();
     }
@@ -247,6 +249,7 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
     setState(() {
       _busy = true;
       _error = null;
+      _justRegistered = false;
     });
     try {
       await widget.signIn(_email.text.trim(), _password.text);
@@ -363,11 +366,17 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
     if (_legal.isEmpty || !_accepted.containsAll(_legal.keys)) {
       throw const PatientRequestFailure('412');
     }
-    if (_email.text.trim().isEmpty ||
-        _email.text.trim().length > 254 ||
-        _password.text.length < 8 ||
-        _password.text.length > 128) {
-      throw const PatientRequestFailure('400');
+    final email = _email.text.trim();
+    if (email.length > 254 ||
+        !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
+      throw const PatientRequestFailure('REGISTER_EMAIL_INVALID');
+    }
+    if (_password.text.length < 8 || _password.text.length > 128) {
+      throw const PatientRequestFailure('REGISTER_PASSWORD_LENGTH');
+    }
+    if (!RegExp(r'[A-Za-z]').hasMatch(_password.text) ||
+        !RegExp(r'[0-9]').hasMatch(_password.text)) {
+      throw const PatientRequestFailure('REGISTER_PASSWORD_COMPLEXITY');
     }
     _registrationKey ??= patientOperationKey();
     try {
@@ -377,7 +386,7 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
         authenticated: false,
         key: _registrationKey,
         body: {
-          'email': _email.text.trim(),
+          'email': email,
           'password': _password.text,
           'locale': 'ja-JP',
           'consents': {
@@ -393,7 +402,11 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
       // A definitive validation/consent rejection did not create an account;
       // allow correction with a fresh key. For an unknown network outcome,
       // retain both this key and the now-locked request fields for safe replay.
-      if (error.code == '400' || error.code == '412') {
+      if (error.code == '400') {
+        _registrationKey = null;
+        _registrationRecoveryNotice = null;
+        throw const PatientRequestFailure('REGISTER_REJECTED');
+      } else if (error.code == '412') {
         _registrationKey = null;
         _registrationRecoveryNotice = null;
       } else if (error.code == '409') {
@@ -406,6 +419,7 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
     }
     _registrationRecoveryNotice =
         '登録は完了しました。ログインに失敗した場合は、同じメールアドレスとパスワードでログインできます。';
+    _justRegistered = true;
     try {
       await widget.signIn(_email.text.trim(), _password.text);
       _password.clear();
@@ -453,6 +467,7 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
     setState(() {
       _step = 'login';
       _error = null;
+      _justRegistered = false;
     });
   }
 
@@ -1707,6 +1722,13 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
         'メールアドレスの確認',
         style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
       ),
+      if (_justRegistered)
+        Semantics(
+          liveRegion: true,
+          child: Text(
+            '登録が完了しました。メールアドレスの確認が必要です。確認メールをまだ送信していない場合は「確認メールを送信」を押し、メール内のリンクを開いてください。',
+          ),
+        ),
       const Text('確認メール内のリンクを開いたあと、「確認状況を更新」を押してください。'),
       _button('確認メールを送信', () async {
         final send = widget.sendEmailVerification;
@@ -1733,11 +1755,19 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
             child: Text(_registrationRecoveryNotice!),
           ),
         _field('メールアドレス', _email, readOnly: _registrationKey != null),
+        const Padding(
+          padding: EdgeInsets.only(top: 4, bottom: 12),
+          child: Text('例: name@example.com（254文字以内）'),
+        ),
         _field(
           'パスワード（8〜128文字）',
           _password,
           secret: true,
           readOnly: _registrationKey != null,
+        ),
+        const Padding(
+          padding: EdgeInsets.only(top: 4, bottom: 12),
+          child: Text('8〜128文字。半角英字と数字をそれぞれ1文字以上含めてください。'),
         ),
       ],
       for (final entry in _legal.entries) ...[

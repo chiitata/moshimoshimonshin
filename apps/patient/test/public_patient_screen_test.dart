@@ -347,7 +347,9 @@ void main() {
         }
         if (request.url.path == '/v1/auth/register') {
           expect(header(request, 'authorization'), isNull);
+          expect(header(request, 'content-type'), 'application/json');
           registrationKey = header(request, 'idempotency-key');
+          expect(registrationKey, matches(RegExp(r'^[a-f0-9]{48}$')));
           registeredBody = jsonDecode(request.body) as Map<String, dynamic>;
           auth = 'synthetic-auth';
           return http.Response('{"uid":"synthetic-user"}', 201);
@@ -381,9 +383,16 @@ void main() {
       await tester.tap(find.text('初めてご利用の方（新規登録）'));
       await tester.pumpAndSettle();
       expect(find.text('合成文書 terms_of_service'), findsOneWidget);
+      expect(find.text('例: name@example.com（254文字以内）'), findsOneWidget);
+      expect(
+        find.text('8〜128文字。半角英字と数字をそれぞれ1文字以上含めてください。'),
+        findsOneWidget,
+      );
+      expect(find.text('メールアドレスの形式を確認してください。'), findsNothing);
+      expect(find.text('パスワードには英字と数字を両方含めてください。'), findsNothing);
       await tester.enterText(
         find.byKey(const ValueKey('メールアドレス')),
-        'synthetic@example.test',
+        'invalid-email',
       );
       await tester.enterText(
         find.byKey(const ValueKey('パスワード（8〜128文字）')),
@@ -401,8 +410,35 @@ void main() {
       await tester.ensureVisible(find.text('同意してアカウントを登録'));
       await tester.tap(find.text('同意してアカウントを登録'));
       await tester.pumpAndSettle();
+      expect(registeredBody, isEmpty);
+      expect(find.text('メールアドレスの形式を確認してください。'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('メールアドレス')),
+        'synthetic@example.test',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('パスワード（8〜128文字）')),
+        'onlyletters',
+      );
+      await tester.ensureVisible(find.text('同意してアカウントを登録'));
+      await tester.tap(find.text('同意してアカウントを登録'));
+      await tester.pumpAndSettle();
+      expect(registeredBody, isEmpty);
+      expect(find.text('パスワードには英字と数字を両方含めてください。'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('パスワード（8〜128文字）')),
+        'Synthetic1234',
+      );
+      await tester.ensureVisible(find.text('同意してアカウントを登録'));
+      await tester.tap(find.text('同意してアカウントを登録'));
+      await tester.pumpAndSettle();
       expect(registrationKey, isNotEmpty);
       expect(registeredBody['email'], 'synthetic@example.test');
+      expect(registeredBody['locale'], 'ja-JP');
+      expect(
+        registeredBody.keys,
+        unorderedEquals(['email', 'password', 'locale', 'consents']),
+      );
       expect(
         (registeredBody['consents'] as Map).keys,
         containsAll([
@@ -411,6 +447,8 @@ void main() {
           'health_data_collection',
         ]),
       );
+      expect(find.textContaining('登録が完了しました。メールアドレスの確認が必要です。'), findsOneWidget);
+      expect(find.textContaining('確認メールをまだ送信していない場合'), findsOneWidget);
       expect(find.text('メールアドレスの確認'), findsOneWidget);
     },
   );
@@ -509,6 +547,52 @@ void main() {
       expect(find.textContaining('登録結果を確認できません'), findsOneWidget);
     },
   );
+
+  testWidgets('既存の未確認アカウントには新規登録完了を表示しない', (tester) async {
+    final epoch = Object();
+    String? auth;
+    final client = MockClient((request) async {
+      if (request.url.path == '/v1/me') {
+        return http.Response(
+          '{"emailVerified":false,"accountStatus":"onboarding_pending"}',
+          200,
+        );
+      }
+      fail('Unexpected request ${request.url}');
+    });
+    addTearDown(client.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PublicPatientScreen(
+          api: PublicPatientApi(
+            origin: 'https://api.example.test',
+            client: client,
+            session: () => epoch,
+            tokens: () async => (auth: auth, appCheck: 'synthetic-appcheck'),
+          ),
+          signIn: (_, _) async {
+            auth = 'synthetic-auth';
+          },
+          signOut: () async {},
+          resetPassword: (_) async {},
+          changes: const Stream<void>.empty(),
+        ),
+      ),
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('メールアドレス')),
+      'existing@example.test',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('パスワード')),
+      'Synthetic1234',
+    );
+    await tester.tap(find.text('ログイン'));
+    await tester.pumpAndSettle();
+    expect(find.text('メールアドレスの確認'), findsOneWidget);
+    expect(find.textContaining('登録が完了しました。'), findsNothing);
+    expect(find.textContaining('確認メールをまだ送信していない場合'), findsNothing);
+  });
 
   testWidgets(
     'posts optional freeText separately and clears it on question change',
