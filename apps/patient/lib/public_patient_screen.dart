@@ -1982,10 +1982,13 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
         Text('${_facility!['formattedAddress'] ?? ''}'),
         if (_facility!['syntheticRecipient'] == true)
           const Text('合成デモ施設です。実際の医療機関ではありません。'),
-        if ((_facility!['verificationStatus'] != 'verified' &&
-                _facility!['syntheticRecipient'] != true) ||
-            _facility!['receivingEnabled'] != true)
-          const Text('この施設は現在受け付けていません。送信できません。'),
+        if (_facility!['receivingEnabled'] != true)
+          const Text('この施設は現在受け付けていません。送信できません。')
+        else if (_facility!['verificationStatus'] != 'verified' &&
+            _facility!['syntheticRecipient'] != true)
+          const Text(
+            'このアカウントでは、この施設への送信が許可されていません。施設コードと利用するアカウントを確認してください。',
+          ),
         CheckboxListTile(
           value: _profile,
           onChanged: _busy || _sendKey != null
