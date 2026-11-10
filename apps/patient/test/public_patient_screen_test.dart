@@ -1551,19 +1551,50 @@ void main() {
   for (final scenario in [
     (
       name: '合成施設は受付中',
+      verificationStatus: 'pending',
       syntheticRecipient: true,
       receivingEnabled: true,
       sendable: true,
     ),
     (
       name: '別患者のpending施設は受付不可',
+      verificationStatus: 'pending',
       syntheticRecipient: false,
       receivingEnabled: true,
       sendable: false,
     ),
     (
       name: '停止中の合成施設は受付不可',
+      verificationStatus: 'pending',
       syntheticRecipient: false,
+      receivingEnabled: false,
+      sendable: false,
+    ),
+    (
+      name: '受付中の認証済み施設は合成バインディング不要',
+      verificationStatus: 'verified',
+      syntheticRecipient: false,
+      receivingEnabled: true,
+      sendable: true,
+    ),
+    (
+      name: '認証済みでも受付停止なら同意後も送信不可',
+      verificationStatus: 'verified',
+      syntheticRecipient: false,
+      receivingEnabled: false,
+      sendable: false,
+    ),
+    (
+      name: '旧APIが合成施設許可を返さない場合は安全に拒否',
+      verificationStatus: 'pending',
+      syntheticRecipient: null,
+      receivingEnabled: true,
+      sendable: false,
+    ),
+    (
+      name: '合成施設許可が残っていても受付停止は優先',
+      verificationStatus: 'pending',
+      syntheticRecipient: true,
       receivingEnabled: false,
       sendable: false,
     ),
@@ -1596,8 +1627,9 @@ void main() {
             response = {
               'facilityId': 'synthetic-facility',
               'displayName': '合成データ施設',
-              'verificationStatus': 'pending',
-              'syntheticRecipient': scenario.syntheticRecipient,
+              'verificationStatus': scenario.verificationStatus,
+              if (scenario.syntheticRecipient != null)
+                'syntheticRecipient': scenario.syntheticRecipient,
               'receivingEnabled': scenario.receivingEnabled,
             };
           case '/v1/public/legal-documents':
@@ -1651,11 +1683,26 @@ void main() {
       await tap('施設を確認');
       expect(
         find.text('合成デモ施設です。実際の医療機関ではありません。'),
-        scenario.syntheticRecipient ? findsOneWidget : findsNothing,
+        scenario.syntheticRecipient == true ? findsOneWidget : findsNothing,
       );
       expect(
         find.text('この施設は現在受け付けていません。送信できません。'),
-        scenario.sendable ? findsNothing : findsOneWidget,
+        scenario.receivingEnabled ? findsNothing : findsOneWidget,
+      );
+      expect(
+        find.text(
+          'このアカウントでは、この施設への送信が許可されていません。施設コードと利用するアカウントを確認してください。',
+        ),
+        scenario.receivingEnabled && !scenario.sendable
+            ? findsOneWidget
+            : findsNothing,
+      );
+      expect(
+        tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, '同意した施設へ送信'),
+        ).onPressed,
+        isNull,
+        reason: '送信可能な施設でも明示同意の前には送信できない',
       );
       await tap('「合成データ施設」へ、この問診票と選択した情報を送信することに同意します');
       final button = tester.widget<FilledButton>(
