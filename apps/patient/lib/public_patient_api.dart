@@ -30,6 +30,10 @@ class PatientRequestFailure implements Exception {
     '412' => '現在の利用状態では操作できません。同意・問診・施設の状態を再確認してください。',
     '429' => '操作が集中しています。少し時間をおいて再試行してください。',
     '400' => '入力内容を確認してください。',
+    'REGISTER_EMAIL_INVALID' => 'メールアドレスの形式を確認してください。',
+    'REGISTER_PASSWORD_LENGTH' => 'パスワードは8〜128文字で入力してください。',
+    'REGISTER_PASSWORD_COMPLEXITY' => 'パスワードには英字と数字を両方含めてください。',
+    'REGISTER_REJECTED' => 'メールアドレス・パスワード・同意内容を確認してください。',
     'ANSWER_KEY_EXPIRED' => '回答の再送可能期間が終了しました。問診を続けず、サポートへお問い合わせください。',
     'ANSWER_EDIT_NOT_CONFIRMED' =>
       '保存操作の成否は確認できませんでした。現在の保存内容を確認し、入力を保ったまま再編集してください。',
