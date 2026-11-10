@@ -101,6 +101,7 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
       _medications = false;
   int _generation = 0;
   String? _error, _notice, _intakeId, _questionnaireId, _deliveryId;
+  String? _demoFacilityId;
   String? _createKey, _finalizeKey, _sendKey;
   String? _disclosureVersion, _disclosureHash;
   String _bodyLocation = 'whole_body';
@@ -155,6 +156,8 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
   }
 
   void _clear() {
+    if (_demoFacilityId != null) _facilityId.text = widget.initialFacilityId;
+    _demoFacilityId = null;
     _intake = _question = _summary = _facility = _delivery = null;
     _intakeId = _questionnaireId = _deliveryId = null;
     _createKey = _finalizeKey = _sendKey = null;
@@ -1235,10 +1238,22 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
     _disclosureHash = null;
     _share = false;
     _sendKey = null;
+    final generation = _generation;
+    final owner = api.session();
+    final requestedId = _id(_facilityId.text.trim());
+    if (_demoFacilityId != null && requestedId != _demoFacilityId) {
+      throw const PatientRequestFailure('412');
+    }
     final result = await api.request(
       'GET',
-      '/facilities/${_id(_facilityId.text.trim())}',
+      '/facilities/$requestedId',
     );
+    if (_demoFacilityId != null &&
+        (result['facilityId'] != _demoFacilityId ||
+            result['syntheticRecipient'] != true ||
+            result['verificationStatus'] != 'pending')) {
+      throw const PatientRequestFailure('412');
+    }
     final docs = await api.request('GET', '/public/legal-documents');
     final version = (docs['documents'] as Map?)?['hospital_disclosure'];
     if (version is! Map ||
@@ -1248,9 +1263,15 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
         (version['documentHash'] as String).trim().isEmpty) {
       throw const PatientRequestFailure('412');
     }
-    if (mounted) {
+    if (_isCurrent(generation) && identical(owner, api.session())) {
       setState(() {
         _facility = result;
+        if (result['syntheticStorageOnly'] == true &&
+            result['syntheticRecipient'] == true &&
+            result['verificationStatus'] == 'pending') {
+          // A previously opted-in sandbox can also be selected from history.
+          _demoFacilityId = requestedId;
+        }
         _disclosureVersion = version['version'] as String;
         _disclosureHash = version['documentHash'] as String;
       });
@@ -1260,6 +1281,10 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
   Future<void> _send() async {
     final facility = _facility;
     if (facility == null ||
+        (_demoFacilityId != null &&
+            (facility['facilityId'] != _demoFacilityId ||
+                facility['verificationStatus'] != 'pending' ||
+                facility['syntheticRecipient'] != true)) ||
         !_share ||
         (facility['verificationStatus'] != 'verified' &&
             facility['syntheticRecipient'] != true) ||
@@ -1308,6 +1333,55 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
         _delivery = result;
       });
     }
+  }
+
+  Future<void> _startSyntheticDemo() async {
+    final generation = _generation;
+    final owner = api.session();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('合成デモを開始しますか？'),
+        content: const Text(
+          '架空の情報だけを入力してください。本人専用の架空施設へ送信を保存します。'
+          '実際の医療機関への送信ではなく、病院側の閲覧・受領は確認できません。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('戻る'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('架空情報のみで開始'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true ||
+        !_isCurrent(generation) ||
+        !identical(owner, api.session())) {
+      return;
+    }
+    final result = await api.request(
+      'POST',
+      '/me/synthetic-demo',
+      body: {'syntheticDataOnly': true},
+    );
+    if (!_isCurrent(generation) || !identical(owner, api.session())) return;
+    final id = _id(result['facilityId']);
+    if (result['syntheticRecipient'] != true ||
+        result['verificationStatus'] != 'pending' ||
+        result['mode'] != 'storage_only' ||
+        result['hospitalViewing'] != 'unconfirmed') {
+      throw const PatientRequestFailure('INVALID_RESPONSE');
+    }
+    _clear();
+    setState(() {
+      _demoFacilityId = id;
+      _facilityId.text = id;
+      _step = 'symptom';
+    });
   }
 
   Future<void> _loadHistory() async {
@@ -1844,6 +1918,9 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
         });
       }),
       _button('過去の問診票を見る', _loadHistory),
+      const Divider(),
+      const Text('合成デモ（対応環境のみ）：架空情報で問診・送信保存を試せます。病院側閲覧は未確認です。'),
+      _button('合成デモを開始', _startSyntheticDemo),
     ],
     'symptom' => [
       const Text(
@@ -1972,7 +2049,13 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
       ),
       ..._summaryWidgets(),
       const Divider(height: 32),
-      _field('施設コード', _facilityId, readOnly: _sendKey != null),
+      _field(
+        '施設コード',
+        _facilityId,
+        readOnly: _sendKey != null || _demoFacilityId != null,
+      ),
+      if (_demoFacilityId != null)
+        const Text('APIで発行された本人専用施設です。送信保存のみで、病院側閲覧・受領は未確認です。'),
       _button('施設を確認', _loadFacility, enabled: _sendKey == null),
       if (_facility != null) ...[
         Text(
@@ -2038,14 +2121,21 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
         '送信状況',
         style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
       ),
-      Text(switch (_delivery?['status']) {
-        'created' => '受付済み・配送処理中',
-        'delivered' => '施設の受信箱へ届きました',
-        'acknowledged' => '施設が受領を確認しました',
-        'failed' => '配送に失敗しました',
-        'revoked' => '送信は取り消されました',
-        _ => '状況を確認してください',
-      }),
+      if (_demoFacilityId != null || _facility?['syntheticStorageOnly'] == true)
+        Text(
+          _delivery?['status'] == 'delivered'
+              ? '合成デモの送信を保存しました。病院側閲覧・受領は未確認です。'
+              : '合成デモの保存状況：${_delivery?['status'] ?? '確認中'}。病院側閲覧・受領は未確認です。',
+        )
+      else
+        Text(switch (_delivery?['status']) {
+          'created' => '受付済み・配送処理中',
+          'delivered' => '施設の受信箱へ届きました',
+          'acknowledged' => '施設が受領を確認しました',
+          'failed' => '配送に失敗しました',
+          'revoked' => '送信は取り消されました',
+          _ => '状況を確認してください',
+        }),
       const Text('受信・受領確認は診察や予約の確定ではありません。'),
       _button('送信状況を更新', _refreshDelivery),
       _button('ホームへ戻る', () async {
@@ -2107,6 +2197,8 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
                   child: const Text('確認用公開版です。架空の情報でお試しください。診断・治療・予約は行いません。'),
                 ),
                 const SizedBox(height: 24),
+                if (_demoFacilityId != null)
+                  const Text('合成デモ中：架空情報のみ。送信保存まで（病院側閲覧は未確認）。'),
                 if (_busy) const LinearProgressIndicator(),
                 if (_error != null)
                   Padding(
