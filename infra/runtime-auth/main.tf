@@ -19,9 +19,9 @@ provider "google" {
 # verifyIdToken(token, true) calls GetAccountInfo to reject revoked/disabled users.
 # User writes are limited to create/update; no Auth config, password hashes or project-wide Admin role.
 resource "google_project_iam_custom_role" "api_auth_read" {
-  project     = var.project_id
-  role_id     = "moshimoshiApiAuthRead"
-  title       = "Moshimoshi API Firebase Auth user operations"
+  project = var.project_id
+  role_id = "moshimoshiApiAuthRead"
+  title   = "Moshimoshi API Firebase Auth user operations"
   permissions = [
     "firebaseauth.users.get",
     "firebaseauth.users.create",
