@@ -383,6 +383,13 @@ void main() {
       await tester.tap(find.text('初めてご利用の方（新規登録）'));
       await tester.pumpAndSettle();
       expect(find.text('合成文書 terms_of_service'), findsOneWidget);
+      expect(find.text('例: name@example.com（254文字以内）'), findsOneWidget);
+      expect(
+        find.text('8〜128文字。半角英字と数字をそれぞれ1文字以上含めてください。'),
+        findsOneWidget,
+      );
+      expect(find.text('メールアドレスの形式を確認してください。'), findsNothing);
+      expect(find.text('パスワードには英字と数字を両方含めてください。'), findsNothing);
       await tester.enterText(
         find.byKey(const ValueKey('メールアドレス')),
         'invalid-email',

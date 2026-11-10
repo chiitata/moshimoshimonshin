@@ -1755,11 +1755,19 @@ class _PublicPatientScreenState extends State<PublicPatientScreen> {
             child: Text(_registrationRecoveryNotice!),
           ),
         _field('メールアドレス', _email, readOnly: _registrationKey != null),
+        const Padding(
+          padding: EdgeInsets.only(top: 4, bottom: 12),
+          child: Text('例: name@example.com（254文字以内）'),
+        ),
         _field(
           'パスワード（8〜128文字）',
           _password,
           secret: true,
           readOnly: _registrationKey != null,
+        ),
+        const Padding(
+          padding: EdgeInsets.only(top: 4, bottom: 12),
+          child: Text('8〜128文字。半角英字と数字をそれぞれ1文字以上含めてください。'),
         ),
       ],
       for (final entry in _legal.entries) ...[
