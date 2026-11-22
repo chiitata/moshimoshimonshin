@@ -1,0 +1,28 @@
+# Google Cloud / Firebase baseline APIs for project-7efcc4c4-6c86-490c-ba5.
+# Keep one service per line so verify-baseline.sh can compare deterministically.
+artifactregistry.googleapis.com
+cloudbuild.googleapis.com
+cloudfunctions.googleapis.com
+cloudresourcemanager.googleapis.com
+cloudscheduler.googleapis.com
+cloudtasks.googleapis.com
+eventarc.googleapis.com
+fcm.googleapis.com
+firebase.googleapis.com
+firebaseappcheck.googleapis.com
+firebasedatabase.googleapis.com
+firebasehosting.googleapis.com
+firebaserules.googleapis.com
+firebasestorage.googleapis.com
+firestore.googleapis.com
+iam.googleapis.com
+iamcredentials.googleapis.com
+identitytoolkit.googleapis.com
+logging.googleapis.com
+monitoring.googleapis.com
+run.googleapis.com
+secretmanager.googleapis.com
+securetoken.googleapis.com
+serviceusage.googleapis.com
+storage.googleapis.com
+sts.googleapis.com

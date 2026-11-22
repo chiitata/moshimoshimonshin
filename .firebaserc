@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "moshimoshimonshin"
+    "default": "demo-mmr-dev",
+    "main": "project-7efcc4c4-6c86-490c-ba5"
   }
 }
