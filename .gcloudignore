@@ -1,0 +1,11 @@
+.git
+**/node_modules
+archive
+REPOS
+.scratch
+.playwright-mcp
+apps/patient/build
+apps/hospital/out
+apps/hospital/.next
+infra/terraform/.terraform
+**/*.tfstate*

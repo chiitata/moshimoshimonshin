@@ -2,9 +2,10 @@
 # image は CD（#38）が差し替えるため ignore_changes。env/secret/スケーリングが正本。
 
 resource "google_cloud_run_v2_service" "api" {
-  name     = "api"
-  location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
+  name                = "api"
+  location            = var.region
+  ingress             = "INGRESS_TRAFFIC_ALL"
+  deletion_protection = false
 
   template {
     service_account                  = local.api_sa_email
@@ -103,7 +104,8 @@ resource "google_cloud_run_v2_service" "worker" {
   name     = "worker"
   location = var.region
   # 非公開（Scheduler/Tasks からの OIDC 呼び出しのみ想定）
-  ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  deletion_protection = false
 
   template {
     service_account                  = local.worker_sa_email
